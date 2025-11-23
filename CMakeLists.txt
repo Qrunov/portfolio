@@ -1,331 +1,292 @@
 cmake_minimum_required(VERSION 3.20)
-project(PortfolioDatabase VERSION 2.3.0 LANGUAGES CXX)
+project(PortfolioManagement CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -fPIC")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ОПЦИИ СБОРКИ
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# Find Dependencies
+# ============================================================================
 
-option(BUILD_TESTS "Build unit tests" ON)
-option(BUILD_PLUGINS "Build database plugins" ON)
-option(BUILD_STRATEGIES "Build trading strategies" ON)
-option(ENABLE_COVERAGE "Enable code coverage" OFF)
+find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(SQLite3 REQUIRED)
+find_package(GTest REQUIRED)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ВКЛЮЧАЕМЫЕ ДИРЕКТОРИИ
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# Core Library
+# ============================================================================
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
-include_directories(${CMAKE_SOURCE_DIR}/src)
-
-# Поиск зависимостей
-find_package(GTest QUIET)
-find_package(quant QUIET)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# CORE LIBRARY
-# Содержит: интерфейсы, PluginManager, CSVDataSource, Portfolio, базовую стратегию
-# ═══════════════════════════════════════════════════════════════════════════════
-
-set(CORE_SOURCES
-    src/PluginManager.cpp
-    src/CSVDataSource.cpp
+add_library(portfolio_core STATIC
     src/Portfolio.cpp
+    src/CSVDataSource.cpp
     src/BasePortfolioStrategy.cpp
+    src/PortfolioManager.cpp
 )
 
-set(CORE_HEADERS
-    include/IPortfolioDatabase.hpp
-    include/IPluginFactory.hpp
-    include/PluginManager.hpp
-    include/IDataSource.hpp
-    src/CSVDataSource.hpp
-    include/Portfolio.hpp
-    include/IPortfolioStrategy.hpp
-    include/BasePortfolioStrategy.hpp
-    include/IStrategyFactory.hpp
+set_target_properties(portfolio_core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
 )
-
-add_library(portfolio_core ${CORE_SOURCES} ${CORE_HEADERS})
 
 target_include_directories(portfolio_core PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${Boost_INCLUDE_DIRS}
 )
 
-target_link_libraries(portfolio_core PUBLIC dl)
+target_link_libraries(portfolio_core PUBLIC
+    ${Boost_LIBRARIES}
+#   sqlite3
+)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DATABASE PLUGINS
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# CLI Library
+# ============================================================================
 
-if(BUILD_PLUGINS)
-    # ─────────────────────────────────────────────────────────────────────────
-    # InMemoryDatabase Plugin
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    add_library(portfolio_inmemory_plugin SHARED
-        src/InMemoryDatabase.cpp
-        src/InMemoryDatabase.hpp
-        src/InMemoryDatabasePlugin.cpp
-        src/InMemoryDatabasePlugin.hpp
-    )
+add_library(portfolio_cli STATIC
+    src/CommandLineParser.cpp
+    src/CommandExecutor.cpp
+)
 
-    target_include_directories(portfolio_inmemory_plugin PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-    )
+target_include_directories(portfolio_cli PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${Boost_INCLUDE_DIRS}
+)
 
-    target_link_libraries(portfolio_inmemory_plugin PUBLIC portfolio_core)
+target_link_libraries(portfolio_cli PUBLIC
+    portfolio_core
+    ${Boost_LIBRARIES}
+)
 
-    install(TARGETS portfolio_inmemory_plugin
-        LIBRARY DESTINATION lib/portfolio_plugins
-    )
+# ============================================================================
+# Main Application
+# ============================================================================
 
-    message(STATUS "✅ Database plugins enabled (portfolio_inmemory_plugin)")
-endif()
+add_executable(portfolio_app src/main.cpp)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# STRATEGY PLUGINS
-# ═══════════════════════════════════════════════════════════════════════════════
+target_include_directories(portfolio_app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${Boost_INCLUDE_DIRS}
+)
 
-if(BUILD_STRATEGIES)
-    # ─────────────────────────────────────────────────────────────────────────
-    # Buy & Hold Strategy Plugin
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    add_library(portfolio_buyandhold_strategy SHARED
-        src/BuyAndHoldStrategy.cpp
-        src/BuyAndHoldStrategy.hpp
-        src/BuyAndHoldStrategyPlugin.cpp
-        src/BuyAndHoldStrategyPlugin.hpp
-    )
+target_link_libraries(portfolio_app PRIVATE
+    portfolio_core
+    portfolio_cli
+    ${Boost_LIBRARIES}
+    dl
+)
 
-    target_include_directories(portfolio_buyandhold_strategy PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-    )
+# ============================================================================
+# Plugins
+# ============================================================================
 
-    target_link_libraries(portfolio_buyandhold_strategy PUBLIC portfolio_core)
+# InMemory Database Plugin
+add_library(inmemory_db_plugin SHARED
+    plugins/database/inmemory/InMemoryDatabase.cpp
+    plugins/database/inmemory/InMemoryDatabasePlugin.cpp
+)
 
-    if(quant_FOUND)
-        target_link_libraries(portfolio_buyandhold_strategy PUBLIC quant)
-        message(STATUS "✅ libquant found - trading calendar support enabled")
-    else()
-        message(STATUS "⚠️  libquant not found - strategies without trading calendar")
-    endif()
+target_include_directories(inmemory_db_plugin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-    install(TARGETS portfolio_buyandhold_strategy
-        LIBRARY DESTINATION lib/portfolio_strategies
-    )
+target_link_libraries(inmemory_db_plugin PRIVATE
+    portfolio_core
+)
 
-    message(STATUS "✅ Strategy plugins enabled (portfolio_buyandhold_strategy)")
-endif()
+set_target_properties(inmemory_db_plugin PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "inmemory_db"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins/database"
+    SUFFIX ".so"
+)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ТЕСТЫ
-# ═══════════════════════════════════════════════════════════════════════════════
+# SQLite Database Plugin
+add_library(sqlite_db_plugin SHARED
+    plugins/database/sqlite/SQLiteDatabase.cpp
+    plugins/database/sqlite/SQLiteDatabasePlugin.cpp
+)
 
-if(BUILD_TESTS)
-    enable_testing()
+target_include_directories(sqlite_db_plugin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${SQLite3_INCLUDE_DIRS}
+)
 
-    if(NOT GTest_FOUND)
-        message(WARNING "Google Test not found - skipping tests")
-    else()
-        # ─────────────────────────────────────────────────────────────────────
-        # Test: Portfolio
-        # ─────────────────────────────────────────────────────────────────────
-        
-        add_executable(test_portfolio tests/test_portfolio.cpp)
+target_link_libraries(sqlite_db_plugin PRIVATE
+    portfolio_core
+    ${SQLite3_LIBRARIES}
+)
 
-        target_link_libraries(test_portfolio
-            portfolio_core
-            GTest::gtest
-            GTest::gtest_main
-        )
+set_target_properties(sqlite_db_plugin PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "sqlite_db"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins/database"
+    SUFFIX ".so"
+)
 
-        add_test(NAME PortfolioTests COMMAND test_portfolio)
-        message(STATUS "✅ Portfolio tests added")
+# BuyHold Strategy Plugin
+add_library(buyhold_strategy_plugin SHARED
+    plugins/strategy/buyhold/BuyHoldStrategy.cpp
+    plugins/strategy/buyhold/BuyHoldStrategyPlugin.cpp
+)
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Test: CSVDataSource
-        # ─────────────────────────────────────────────────────────────────────
-        
-        add_executable(test_csv_datasource tests/test_csv_datasource.cpp)
+target_include_directories(buyhold_strategy_plugin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-        target_link_libraries(test_csv_datasource
-            portfolio_core
-            GTest::gtest
-            GTest::gtest_main
-        )
+target_link_libraries(buyhold_strategy_plugin PRIVATE
+    portfolio_core
+)
 
-        add_test(NAME CSVDataSourceV2Tests COMMAND test_csv_datasource_v2)
-        message(STATUS "✅ CSVDataSource tests added")
+set_target_properties(buyhold_strategy_plugin PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "buyhold_strategy"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins/strategy"
+    SUFFIX ".so"
+)
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Test: PluginManager
-        # ─────────────────────────────────────────────────────────────────────
-        
-        add_executable(test_plugin_manager tests/test_plugin_manager.cpp)
+# ============================================================================
+# Tests
+# ============================================================================
 
-        target_link_libraries(test_plugin_manager
-            portfolio_core
-            GTest::gtest
-            GTest::gtest_main
-        )
+enable_testing()
 
-        add_test(NAME PluginManagerTests COMMAND test_plugin_manager)
-        message(STATUS "✅ PluginManager tests added")
+# ============================================================================
+# Global Test Environment
+# ============================================================================
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Test: InMemoryDatabase (requires plugin)
-        # ─────────────────────────────────────────────────────────────────────
-        
-        if(BUILD_PLUGINS)
-            add_executable(test_inmemory_database tests/test_inmemory_database.cpp)
+# Устанавливаем переменную окружения для поиска плагинов
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILE "${CMAKE_BINARY_DIR}/CTestEnv.cmake")
 
-            target_link_libraries(test_inmemory_database
-                portfolio_inmemory_plugin
-                GTest::gtest
-                GTest::gtest_main
-            )
+# Создаем файл для установки переменных окружения
+file(WRITE "${CMAKE_BINARY_DIR}/CTestEnv.cmake"
+    "set(ENV{PORTFOLIO_PLUGIN_PATH} \"${CMAKE_BINARY_DIR}/plugins\")\n"
+)
 
-            add_test(NAME InMemoryDatabaseTests COMMAND test_inmemory_database)
-            message(STATUS "✅ InMemoryDatabase tests added")
-        endif()
+# Test: Command Line Parser and Executor
+add_executable(test_command_line tests/test_command_line.cpp)
+target_include_directories(test_command_line PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(test_command_line PRIVATE
+    portfolio_core
+    portfolio_cli
+    ${Boost_LIBRARIES}
+    gtest
+    gtest_main
+)
+add_test(NAME CommandLineTests COMMAND test_command_line)
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Test: Portfolio Strategy (requires plugin + inmemory)
-        # ─────────────────────────────────────────────────────────────────────
-        
-        if(BUILD_STRATEGIES AND BUILD_PLUGINS)
-            add_executable(test_strategy tests/test_strategy_with_inmemory.cpp)
+# Test: CSV Data Source
+add_executable(test_csv_datasource tests/test_csv_datasource.cpp)
+target_include_directories(test_csv_datasource PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_csv_datasource PRIVATE
+    portfolio_core
+    gtest
+    gtest_main
+)
+add_test(NAME CSVDataSourceTests COMMAND test_csv_datasource)
 
-            target_link_libraries(test_strategy
-                portfolio_core
-                portfolio_inmemory_plugin
-                portfolio_buyandhold_strategy
-                GTest::gtest
-                GTest::gtest_main
-            )
+# Test: Portfolio
+add_executable(test_portfolio tests/test_portfolio.cpp)
+target_include_directories(test_portfolio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_portfolio PRIVATE
+    portfolio_core
+    gtest
+    gtest_main
+)
+add_test(NAME PortfolioTests COMMAND test_portfolio)
 
-            if(quant_FOUND)
-                target_link_libraries(test_strategy quant)
-            endif()
+# Test: Plugin Manager (InMemory + SQLite)
+add_executable(test_plugin_manager tests/test_plugin_manager.cpp)
+target_include_directories(test_plugin_manager PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_plugin_manager PRIVATE
+    portfolio_core
+    gtest
+    gtest_main
+    dl
+)
+add_test(NAME PluginManagerTests COMMAND test_plugin_manager)
 
-            add_test(NAME StrategyTests COMMAND test_strategy)
-            message(STATUS "✅ Strategy tests added")
-        endif()
+# Test: SQLite Database (через плагин)
+add_executable(test_sqlite_database tests/test_sqlite_database.cpp)
+target_include_directories(test_sqlite_database PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${SQLite3_INCLUDE_DIRS}
+)
+target_link_libraries(test_sqlite_database PRIVATE
+    portfolio_core
+    ${SQLite3_LIBRARIES}
+    gtest
+    gtest_main
+    dl
+)
+add_test(NAME SQLiteDatabaseTests COMMAND test_sqlite_database)
 
-        message(STATUS "✅ All unit tests configured")
-    endif()
-endif()
+# Test: BuyHold Strategy
+add_executable(test_buyhold_strategy tests/test_buyhold_strategy.cpp)
+target_include_directories(test_buyhold_strategy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_buyhold_strategy PRIVATE
+    portfolio_core
+    gtest
+    gtest_main
+    dl
+)
+add_test(NAME BuyHoldStrategyTests COMMAND test_buyhold_strategy)
+set_tests_properties(BuyHoldStrategyTests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    ENVIRONMENT "PORTFOLIO_PLUGIN_PATH=${CMAKE_BINARY_DIR}/plugins"
+)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CODE COVERAGE
-# ═══════════════════════════════════════════════════════════════════════════════
 
-if(ENABLE_COVERAGE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
-    message(STATUS "✅ Code coverage enabled")
-endif()
+# ============================================================================
+# Enable Testing
+# ============================================================================
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# INSTALLATION
-# ═══════════════════════════════════════════════════════════════════════════════
+enable_testing()
 
-install(TARGETS portfolio_core
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
+# ============================================================================
+# Installation Targets
+# ============================================================================
+
+install(TARGETS portfolio_app
     RUNTIME DESTINATION bin
 )
 
-install(FILES
-    include/IPortfolioDatabase.hpp
-    include/IPluginFactory.hpp
-    include/PluginManager.hpp
-    include/Portfolio.hpp
-    include/IPortfolioStrategy.hpp
-    include/BasePortfolioStrategy.hpp
-    include/IStrategyFactory.hpp
-    include/IDataSource.hpp
+install(TARGETS inmemory_db_plugin sqlite_db_plugin buyhold_strategy_plugin
+    LIBRARY DESTINATION lib/portfolio/plugins
+)
+
+install(DIRECTORY include/
     DESTINATION include/portfolio
 )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# BUILD INFORMATION
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# Print Configuration
+# ============================================================================
 
-message(STATUS "")
-message(STATUS "╔════════════════════════════════════════════════════════════╗")
-message(STATUS "║   Portfolio Database v${PROJECT_VERSION}                      ║")
-message(STATUS "╚════════════════════════════════════════════════════════════╝")
-message(STATUS "")
-message(STATUS "📋 Configuration:")
-message(STATUS "   C++ Standard:          ${CMAKE_CXX_STANDARD}")
-message(STATUS "   Build Type:            ${CMAKE_BUILD_TYPE}")
-message(STATUS "   Build Tests:           ${BUILD_TESTS}")
-message(STATUS "   Build Plugins:         ${BUILD_PLUGINS}")
-message(STATUS "   Build Strategies:      ${BUILD_STRATEGIES}")
-message(STATUS "   Enable Coverage:       ${ENABLE_COVERAGE}")
-message(STATUS "   libquant available:    ${quant_FOUND}")
-message(STATUS "   Google Test found:     ${GTest_FOUND}")
-message(STATUS "   Install Prefix:        ${CMAKE_INSTALL_PREFIX}")
-message(STATUS "")
-message(STATUS "📚 Core Library:")
-message(STATUS "   • portfolio_core")
-message(STATUS "     ├─ PluginManager (plugin manager)")
-message(STATUS "     ├─ Portfolio (portfolio management)")
-message(STATUS "     ├─ CSVDataSourceV2 (CSV data loading)")
-message(STATUS "     ├─ IDataSource (data source interface)")
-message(STATUS "     ├─ IPortfolioStrategy (strategy interface)")
-message(STATUS "     └─ BasePortfolioStrategy (template method base)")
-message(STATUS "")
-
-if(BUILD_PLUGINS)
-    message(STATUS "🔌 Database Plugins:")
-    message(STATUS "   • portfolio_inmemory_plugin (libportfolio_inmemory_plugin.so)")
-    message(STATUS "     └─ InMemoryDatabase (in-memory database implementation)")
-    message(STATUS "")
-endif()
-
-if(BUILD_STRATEGIES)
-    message(STATUS "📈 Strategy Plugins:")
-    message(STATUS "   • portfolio_buyandhold_strategy (libportfolio_buyandhold_strategy.so)")
-    message(STATUS "     └─ BuyAndHoldStrategy (buy & hold trading strategy)")
-    message(STATUS "")
-endif()
-
-if(BUILD_TESTS AND GTest_FOUND)
-    message(STATUS "🧪 Tests:")
-    message(STATUS "   • test_portfolio (25+ tests)")
-    message(STATUS "   • test_csv_datasource_v2 (20+ tests)")
-    message(STATUS "   • test_plugin_manager (14+ tests)")
-    if(BUILD_PLUGINS)
-        message(STATUS "   • test_inmemory_database (30+ tests)")
-    endif()
-    if(BUILD_STRATEGIES AND BUILD_PLUGINS)
-        message(STATUS "   • test_strategy (20+ tests with InMemoryDatabase)")
-    endif()
-    message(STATUS "   Total: 100+ tests")
-    message(STATUS "")
-endif()
-
-message(STATUS "🚀 Quick Start:")
-message(STATUS "   mkdir build && cd build")
-message(STATUS "   cmake .. -DCMAKE_BUILD_TYPE=Release \\")
-message(STATUS "            -DBUILD_TESTS=ON \\")
-message(STATUS "            -DBUILD_PLUGINS=ON \\")
-message(STATUS "            -DBUILD_STRATEGIES=ON")
-message(STATUS "   cmake --build . -j4")
-message(STATUS "   ctest --verbose")
-message(STATUS "")
-message(STATUS "📦 Install:")
-message(STATUS "   cmake --install . --prefix /usr/local")
-message(STATUS "")
-message(STATUS "╚════════════════════════════════════════════════════════════╝")
-message(STATUS "")
+message(STATUS "=== Portfolio Management System Configuration ===")
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "Boost: ${Boost_VERSION}")
+message(STATUS "SQLite3: ${SQLite3_VERSION}")
+message(STATUS "GTest: Found")
+message(STATUS "Plugins output directory: ${CMAKE_BINARY_DIR}/plugins")
+message(STATUS "================================================")

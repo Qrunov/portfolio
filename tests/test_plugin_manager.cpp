@@ -1,371 +1,224 @@
-#include "PluginManager.hpp"
 #include <gtest/gtest.h>
+#include "PluginManager.hpp"
+#include "IPortfolioDatabase.hpp"
 #include <filesystem>
 #include <memory>
 
 using namespace portfolio;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Test Fixtures
-// ═══════════════════════════════════════════════════════════════════════════════
-
 class PluginManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Получаем singleton
-        manager_ = &DatabasePluginManager::getInstance();
-        
-        // Очищаем все плагины перед тестом
-        manager_->unloadAll();
-        
-        // Путь к папке с плагинами
-        pluginsDir_ = std::filesystem::current_path().parent_path() / "lib" / "portfolio_plugins";
+        // Получаем путь к плагинам из переменной окружения
+        const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
+        if (pluginPath) {
+            manager = std::make_unique<PluginManager<IPortfolioDatabase>>(pluginPath);
+        } else {
+            manager = std::make_unique<PluginManager<IPortfolioDatabase>>("./plugins");
+        }
     }
 
     void TearDown() override {
-        // Очищаем все плагины после теста
-        manager_->unloadAll();
+        if (manager) {
+            manager->unloadAll();
+        }
     }
 
-    DatabasePluginManager* manager_;
-    std::filesystem::path pluginsDir_;
+    std::unique_ptr<PluginManager<IPortfolioDatabase>> manager;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Загрузка плагинов из директории
-// ═══════════════════════════════════════════════════════════════════════════════
-
-TEST_F(PluginManagerTest, LoadPluginsFromDirectory) {
-    // Проверяем, существует ли папка с плагинами
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found: " << pluginsDir_.string();
-    }
-
-    // Act
-    auto result = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-
-    // Assert
-    if (!std::filesystem::is_empty(pluginsDir_)) {
-        EXPECT_TRUE(result.has_value()) << "Failed to load plugins: " << result.error();
-    }
+TEST_F(PluginManagerTest, DefaultConstructor) {
+    auto pm = PluginManager<IPortfolioDatabase>();
+    EXPECT_EQ(pm.getPluginPath(), "./plugins");
 }
 
-TEST_F(PluginManagerTest, GetAvailablePlugins) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
-
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
-
-    // Act
-    auto plugins = manager_->getAvailablePlugins();
-
-    // Assert
-    EXPECT_GT(plugins.size(), 0);
-    
-    // Проверяем, что имена и версии не пусты
-    for (const auto& plugin : plugins) {
-        EXPECT_FALSE(plugin.name.empty());
-        EXPECT_FALSE(plugin.version.empty());
-    }
+TEST_F(PluginManagerTest, ConstructorWithPath) {
+    auto pm = PluginManager<IPortfolioDatabase>("/custom/path");
+    EXPECT_EQ(pm.getPluginPath(), "/custom/path");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Поиск конкретного плагина
-// ═══════════════════════════════════════════════════════════════════════════════
-
-TEST_F(PluginManagerTest, FindInMemoryDatabasePlugin) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
-
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
-
-    // Act
-    auto plugins = manager_->getAvailablePlugins();
-    auto it = std::find_if(plugins.begin(), plugins.end(),
-        [](const auto& p) { return p.name == "InMemoryDatabase"; });
-
-    // Assert
-    EXPECT_NE(it, plugins.end()) << "InMemoryDatabase plugin not found";
-    if (it != plugins.end()) {
-        EXPECT_FALSE(it->version.empty());
-    }
+TEST_F(PluginManagerTest, SetPluginPath) {
+    manager->setPluginPath("/new/path");
+    EXPECT_EQ(manager->getPluginPath(), "/new/path");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Создание инстансов через динамически загруженные плагины
-// ═══════════════════════════════════════════════════════════════════════════════
+TEST_F(PluginManagerTest, LoadInMemoryPlugin) {
+    auto result = manager->loadDatabasePlugin("inmemory_db", "");
+    ASSERT_TRUE(result.has_value()) << "Failed to load InMemory plugin: " << result.error();
 
-TEST_F(PluginManagerTest, CreateInMemoryDatabaseInstance) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
-
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
-
-    // Act
-    auto dbResult = manager_->create("InMemoryDatabase", "");
-
-    // Assert
-    EXPECT_TRUE(dbResult.has_value()) 
-        << "Failed to create InMemoryDatabase: " << dbResult.error();
-    
-    if (dbResult) {
-        EXPECT_NE(dbResult->get(), nullptr);
-    }
+    auto db = result.value();
+    EXPECT_NE(db, nullptr);
 }
 
-TEST_F(PluginManagerTest, CreatedInstanceImplementsInterface) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
+TEST_F(PluginManagerTest, InMemoryPluginHasCorrectInterface) {
+    auto result = manager->loadDatabasePlugin("inmemory_db", "");
+    ASSERT_TRUE(result.has_value());
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
+    auto db = result.value();
 
-    // Act
-    auto dbResult = manager_->create("InMemoryDatabase", "");
-    ASSERT_TRUE(dbResult.has_value());
-
-    auto db = std::move(*dbResult);
-
-    // Assert - проверяем интерфейс
-    auto saveResult = db->saveInstrument("TEST", "Test Corp", "stock", "TEST_SOURCE");
+    // Проверяем что интерфейс работает
+    auto saveResult = db->saveInstrument("TEST", "Test", "stock", "TEST");
     EXPECT_TRUE(saveResult.has_value());
 
-    auto exists = db->instrumentExists("TEST");
-    EXPECT_TRUE(exists.has_value());
-    EXPECT_TRUE(*exists);
-
-    auto listResult = db->listInstruments();
-    EXPECT_TRUE(listResult.has_value());
-    EXPECT_GT(listResult->size(), 0);
+    auto existsResult = db->instrumentExists("TEST");
+    ASSERT_TRUE(existsResult.has_value());
+    EXPECT_TRUE(existsResult.value());
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Работа с интерфейсом
-// ═══════════════════════════════════════════════════════════════════════════════
+TEST_F(PluginManagerTest, LoadSQLitePlugin) {
+    std::string dbPath = "test_manager.db";
 
-TEST_F(PluginManagerTest, SaveAndRetrieveInstrument) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
+    // Удаляем старый файл если существует
+    if (std::filesystem::exists(dbPath)) {
+        std::filesystem::remove(dbPath);
     }
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
+    auto result = manager->loadDatabasePlugin("sqlite_db", dbPath);
+    ASSERT_TRUE(result.has_value()) << "Failed to load SQLite plugin: " << result.error();
+
+    auto db = result.value();
+    EXPECT_NE(db, nullptr);
+
+    // Очищаем
+    if (std::filesystem::exists(dbPath)) {
+        std::filesystem::remove(dbPath);
     }
-
-    auto dbResult = manager_->create("InMemoryDatabase", "");
-    ASSERT_TRUE(dbResult.has_value());
-    auto db = std::move(*dbResult);
-
-    // Act
-    db->saveInstrument("GAZP", "Gazprom", "stock", "MOEX");
-    db->saveInstrument("SBER", "Sberbank", "stock", "MOEX");
-    db->saveInstrument("YNDX", "Yandex", "stock", "NYSE");
-
-    auto instruments = db->listInstruments();
-
-    // Assert
-    ASSERT_TRUE(instruments.has_value());
-    EXPECT_EQ(instruments->size(), 3);
 }
 
-TEST_F(PluginManagerTest, FilterInstrumentsBySource) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
+TEST_F(PluginManagerTest, SQLitePluginPersistence) {
+    std::string dbPath = "test_persistence.db";
+
+    // Удаляем старый файл если существует
+    if (std::filesystem::exists(dbPath)) {
+        std::filesystem::remove(dbPath);
     }
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
+    // Первая сессия - сохраняем инструмент
+    {
+        auto result = manager->loadDatabasePlugin("sqlite_db", dbPath);
+        ASSERT_TRUE(result.has_value());
+
+        auto db = result.value();
+        auto saveResult = db->saveInstrument("GAZP", "Gazprom", "stock", "MOEX");
+        EXPECT_TRUE(saveResult.has_value());
     }
 
-    auto dbResult = manager_->create("InMemoryDatabase", "");
-    ASSERT_TRUE(dbResult.has_value());
-    auto db = std::move(*dbResult);
+    // Вторая сессия - проверяем что данные сохранились
+    {
+        auto result = manager->loadDatabasePlugin("sqlite_db", dbPath);
+        ASSERT_TRUE(result.has_value());
 
-    // Act
-    db->saveInstrument("GAZP", "Gazprom", "stock", "MOEX");
-    db->saveInstrument("SBER", "Sberbank", "stock", "MOEX");
-    db->saveInstrument("YNDX", "Yandex", "stock", "NYSE");
+        auto db = result.value();
+        auto existsResult = db->instrumentExists("GAZP");
+        ASSERT_TRUE(existsResult.has_value());
+        EXPECT_TRUE(existsResult.value());
+    }
 
-    auto moexInstruments = db->listInstruments("", "MOEX");
-    auto nyseInstruments = db->listInstruments("", "NYSE");
-
-    // Assert
-    ASSERT_TRUE(moexInstruments.has_value());
-    ASSERT_TRUE(nyseInstruments.has_value());
-    
-    EXPECT_EQ(moexInstruments->size(), 2);
-    EXPECT_EQ(nyseInstruments->size(), 1);
+    // Очищаем
+    if (std::filesystem::exists(dbPath)) {
+        std::filesystem::remove(dbPath);
+    }
 }
 
-TEST_F(PluginManagerTest, SaveAndRetrieveAttribute) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
-
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
-
-    auto dbResult = manager_->create("InMemoryDatabase", "");
-    ASSERT_TRUE(dbResult.has_value());
-    auto db = std::move(*dbResult);
-
-    // Act
-    db->saveInstrument("GAZP", "Gazprom", "stock", "MOEX");
-    
-    auto now = std::chrono::system_clock::now();
-    db->saveAttribute("GAZP", "close", "MOEX", now, 150.5);
-
-    auto history = db->getAttributeHistory(
-        "GAZP", "close",
-        now - std::chrono::hours(1),
-        now + std::chrono::hours(1)
-    );
-
-    // Assert
-    ASSERT_TRUE(history.has_value());
-    EXPECT_EQ(history->size(), 1);
-    EXPECT_DOUBLE_EQ(std::get<double>(history->at(0).second), 150.5);
+TEST_F(PluginManagerTest, LoadNonExistentPlugin) {
+    auto result = manager->loadDatabasePlugin("nonexistent_db", "");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.error().empty());
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Singleton и управление жизненным циклом
-// ═══════════════════════════════════════════════════════════════════════════════
+TEST_F(PluginManagerTest, ListLoadedPlugins) {
+    manager->loadDatabasePlugin("inmemory_db", "");
 
-TEST_F(PluginManagerTest, SingletonInstance) {
-    // Arrange
-    auto& manager1 = DatabasePluginManager::getInstance();
-    auto& manager2 = DatabasePluginManager::getInstance();
-
-    // Assert
-    EXPECT_EQ(&manager1, &manager2);
+    auto plugins = manager->listLoadedPlugins();
+    EXPECT_EQ(plugins.size(), 1);
+    EXPECT_EQ(plugins[0], "inmemory_db");
 }
 
 TEST_F(PluginManagerTest, UnloadPlugin) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
+    manager->loadDatabasePlugin("inmemory_db", "");
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
+    auto listBefore = manager->listLoadedPlugins();
+    EXPECT_EQ(listBefore.size(), 1);
 
-    auto pluginsBeforeUnload = manager_->getAvailablePlugins();
-    ASSERT_GT(pluginsBeforeUnload.size(), 0);
+    auto unloadResult = manager->unloadPlugin("inmemory_db");
+    EXPECT_TRUE(unloadResult.has_value());
 
-    // Act
-    auto unloadResult = manager_->unloadPlugin("InMemoryDatabase");
-
-    // Assert
-    if (unloadResult) {
-        auto pluginsAfterUnload = manager_->getAvailablePlugins();
-        EXPECT_LT(pluginsAfterUnload.size(), pluginsBeforeUnload.size());
-    }
+    auto listAfter = manager->listLoadedPlugins();
+    EXPECT_EQ(listAfter.size(), 0);
 }
 
 TEST_F(PluginManagerTest, UnloadAllPlugins) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
+    manager->loadDatabasePlugin("inmemory_db", "");
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
+    auto listBefore = manager->listLoadedPlugins();
+    EXPECT_EQ(listBefore.size(), 1);
 
-    auto pluginsBeforeUnload = manager_->getAvailablePlugins();
-    ASSERT_GT(pluginsBeforeUnload.size(), 0);
+    manager->unloadAll();
 
-    // Act
-    manager_->unloadAll();
-
-    auto pluginsAfterUnload = manager_->getAvailablePlugins();
-
-    // Assert
-    EXPECT_EQ(pluginsAfterUnload.size(), 0);
+    auto listAfter = manager->listLoadedPlugins();
+    EXPECT_EQ(listAfter.size(), 0);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Обработка ошибок
-// ═══════════════════════════════════════════════════════════════════════════════
+TEST_F(PluginManagerTest, GetPluginInfo) {
+    manager->loadDatabasePlugin("inmemory_db", "");
 
-TEST_F(PluginManagerTest, CreateNonExistentPlugin) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
+    auto infoResult = manager->getPluginInfo("inmemory_db");
+    ASSERT_TRUE(infoResult.has_value());
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
+    const auto& info = infoResult.value().get();
+    // PluginInfo содержит function pointers, вызываем их как функции
+    EXPECT_NE(info.getName, nullptr);
+    EXPECT_STREQ(info.getName(), "InMemoryDatabase");
 
-    // Act
-    auto result = manager_->create("NonExistentPlugin", "");
-
-    // Assert
-    EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(result.error().empty());
+    EXPECT_NE(info.getVersion, nullptr);
+    const char* version = info.getVersion();
+    EXPECT_STREQ(version, "1.0.0");
 }
 
-TEST_F(PluginManagerTest, LoadNonExistentDirectory) {
-    // Act
-    auto result = manager_->loadPluginsFromDirectory("/nonexistent/path");
+TEST_F(PluginManagerTest, InMemoryDatabaseInterface) {
+    auto result = manager->loadDatabasePlugin("inmemory_db", "");
+    ASSERT_TRUE(result.has_value());
 
-    // Assert
-    EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(result.error().empty());
+    auto db = result.value();
+
+    // Test saveInstrument
+    auto saveResult = db->saveInstrument("SBER", "Sberbank", "stock", "MOEX");
+    EXPECT_TRUE(saveResult.has_value());
+
+    // Test listInstruments
+    auto listResult = db->listInstruments();
+    ASSERT_TRUE(listResult.has_value());
+    EXPECT_EQ(listResult->size(), 1);
+    EXPECT_EQ(listResult->at(0), "SBER");
+
+    // Test listSources
+    auto sourcesResult = db->listSources();
+    ASSERT_TRUE(sourcesResult.has_value());
+    EXPECT_EQ(sourcesResult->size(), 1);
+    EXPECT_EQ(sourcesResult->at(0), "MOEX");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Конфигурация
-// ═══════════════════════════════════════════════════════════════════════════════
+TEST_F(PluginManagerTest, SaveAndRetrieveAttributes) {
+    auto result = manager->loadDatabasePlugin("inmemory_db", "");
+    ASSERT_TRUE(result.has_value());
 
-TEST_F(PluginManagerTest, CreateWithConfiguration) {
-    // Arrange
-    if (!std::filesystem::exists(pluginsDir_)) {
-        GTEST_SKIP() << "Plugins directory not found";
-    }
+    auto db = result.value();
 
-    auto loadResult = manager_->loadPluginsFromDirectory(pluginsDir_.string());
-    if (!loadResult) {
-        GTEST_SKIP() << "No plugins available to test";
-    }
+    // Save instrument
+    auto saveInstrResult = db->saveInstrument("AAPL", "Apple", "stock", "NYSE");
+    EXPECT_TRUE(saveInstrResult.has_value());
 
-    // Act
-    std::string config = R"({"max_size": 1000})";
-    auto dbResult = manager_->create("InMemoryDatabase", config);
+    // Save attribute
+    auto now = std::chrono::system_clock::now();
+    auto saveAttrResult = db->saveAttribute("AAPL", "close", "NYSE", now, AttributeValue(150.5));
+    EXPECT_TRUE(saveAttrResult.has_value());
 
-    // Assert
-    EXPECT_TRUE(dbResult.has_value());
+    // Retrieve attribute
+    auto from = now - std::chrono::hours(1);
+    auto to = now + std::chrono::hours(1);
+    auto getResult = db->getAttributeHistory("AAPL", "close", from, to, "NYSE");
+    ASSERT_TRUE(getResult.has_value());
+    EXPECT_EQ(getResult->size(), 1);
 }
 
 int main(int argc, char** argv) {

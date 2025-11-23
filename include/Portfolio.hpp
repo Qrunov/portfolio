@@ -30,7 +30,7 @@ public:
         double initialCapital);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Геттеры (const correctness)
+    // Геттеры
     // ─────────────────────────────────────────────────────────────────────────
     
     const std::string& name() const noexcept { return name_; }
@@ -52,7 +52,7 @@ public:
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Stock Management (используем std::expected для ошибок)
+    // Stock Management
     // ─────────────────────────────────────────────────────────────────────────
 
     std::expected<void, std::string> addStock(const PortfolioStock& stock);

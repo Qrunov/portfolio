@@ -13,7 +13,7 @@ class BuyAndHoldStrategyTest : public ::testing::Test {
 protected:
     void SetUp() override {
         strategy_ = std::make_unique<BuyAndHoldStrategy>();
-        // ✅ ИСПРАВЛЕНО: используем shared_ptr вместо unique_ptr
+
         database_ = std::make_shared<InMemoryDatabase>();
 
         // Создаем временные точки
@@ -22,7 +22,7 @@ protected:
     }
 
     std::unique_ptr<BuyAndHoldStrategy> strategy_;
-    std::shared_ptr<InMemoryDatabase> database_;  // ✅ shared_ptr
+    std::shared_ptr<InMemoryDatabase> database_;
     TimePoint startDate_;
     TimePoint endDate_;
 
@@ -66,7 +66,7 @@ TEST_F(BuyAndHoldStrategyTest, BacktestWithNegativeCapital) {
     Portfolio p("Test", "BuyAndHold", 100000);
     p.addStock({"GAZP", 100});
 
-    // ✅ ИСПРАВЛЕНО: database_ уже shared_ptr
+
     auto result = strategy_->backtest(p, startDate_, endDate_, -1000, database_);
     EXPECT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("positive"), std::string::npos);

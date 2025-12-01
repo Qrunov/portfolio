@@ -41,13 +41,19 @@ std::expected<void, std::string> CommandExecutor::execute(const ParsedCommand& c
 // Help & Version
 // ═════════════════════════════════════════════════════════════════════════════
 
-std::expected<void, std::string> CommandExecutor::executeHelp(const ParsedCommand& [[maybe_unused]] cmd)
+std::expected<void, std::string> CommandExecutor::executeHelp(const ParsedCommand& cmd)
 {
-    printHelp();
+    // Проверяем, есть ли конкретная тема для справки
+    if (!cmd.positional.empty()) {
+        std::string topic = cmd.positional[0];
+        printHelp(topic);
+    } else {
+        printHelp();
+    }
     return {};
 }
 
-std::expected<void, std::string> CommandExecutor::executeVersion(const ParsedCommand& [[maybe_unused]] cmd)
+std::expected<void, std::string> CommandExecutor::executeVersion(const ParsedCommand& /*cmd*/)
 {
     printVersion();
     return {};
@@ -59,35 +65,151 @@ void CommandExecutor::printHelp(std::string_view topic)
     std::cout << "Portfolio Management System - Command Help" << std::endl;
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
-    std::cout << "USAGE:" << std::endl;
-    std::cout << "  portfolio [COMMAND] [OPTIONS]" << std::endl << std::endl;
+    if (topic.empty()) {
+        // Общая справка
+        std::cout << "USAGE:" << std::endl;
+        std::cout << "  portfolio [COMMAND] [OPTIONS]" << std::endl << std::endl;
 
-    std::cout << "GLOBAL COMMANDS:" << std::endl;
-    std::cout << "  help                    Show this help message" << std::endl;
-    std::cout << "  version                 Show application version" << std::endl << std::endl;
+        std::cout << "GLOBAL COMMANDS:" << std::endl;
+        std::cout << "  help                    Show this help message" << std::endl;
+        std::cout << "  help [COMMAND]          Show help for specific command" << std::endl;
+        std::cout << "  version                 Show application version" << std::endl << std::endl;
 
-    std::cout << "INSTRUMENT COMMANDS:" << std::endl;
-    std::cout << "  instrument list         List all instruments" << std::endl;
-    std::cout << "  instrument show -t ID   Show instrument details" << std::endl;
-    std::cout << "  instrument delete -t ID Delete instrument" << std::endl << std::endl;
+        std::cout << "DATA LOADING:" << std::endl;
+        std::cout << "  load                    Load data from CSV file" << std::endl;
+        std::cout << "    -f, --file FILE       CSV file path" << std::endl;
+        std::cout << "    -t, --instrument-id ID Instrument identifier" << std::endl;
+        std::cout << "    -n, --name NAME       Instrument name" << std::endl;
+        std::cout << "    -s, --source SOURCE   Data source name" << std::endl;
+        std::cout << "    -T, --type TYPE       Instrument type (stock, index, etc.)" << std::endl;
+        std::cout << "    -m, --map MAPPING     Attribute mapping (attr:col)" << std::endl;
+        std::cout << "    --db TYPE             Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "    --db-path PATH        Database file path (for SQLite)" << std::endl << std::endl;
 
-    std::cout << "PORTFOLIO COMMANDS:" << std::endl;
-    std::cout << "  portfolio create -n NAME [--initial-capital AMOUNT]" << std::endl;
-    std::cout << "  portfolio list                                    " << std::endl;
-    std::cout << "  portfolio show -n NAME                            " << std::endl;
-    std::cout << "  portfolio delete -n NAME                          " << std::endl;
-    std::cout << "  portfolio add-instrument -p NAME -i ID [-w WEIGHT]" << std::endl;
-    std::cout << "  portfolio remove-instrument -p NAME -i ID         " << std::endl << std::endl;
+        std::cout << "INSTRUMENT COMMANDS:" << std::endl;
+        std::cout << "  instrument list         List all instruments" << std::endl;
+        std::cout << "  instrument show -t ID   Show instrument details" << std::endl;
+        std::cout << "  instrument delete -t ID Delete instrument" << std::endl << std::endl;
 
-    std::cout << "DATA LOADING:" << std::endl;
-    std::cout << "  load -f FILE -t TICKER -n NAME -s SOURCE -T TYPE" << std::endl << std::endl;
+        std::cout << "PORTFOLIO COMMANDS:" << std::endl;
+        std::cout << "  portfolio create -n NAME [--initial-capital AMOUNT]" << std::endl;
+        std::cout << "  portfolio list                                    " << std::endl;
+        std::cout << "  portfolio show -n NAME                            " << std::endl;
+        std::cout << "  portfolio delete -n NAME                          " << std::endl;
+        std::cout << "  portfolio add-instrument -p NAME -t ID [-w WEIGHT]" << std::endl;
+        std::cout << "  portfolio remove-instrument -p NAME -t ID         " << std::endl << std::endl;
 
-    std::cout << "STRATEGY COMMANDS:" << std::endl;
-    std::cout << "  strategy list           List available strategies" << std::endl;
-    std::cout << "  strategy execute -s STRATEGY" << std::endl << std::endl;
+        std::cout << "STRATEGY COMMANDS:" << std::endl;
+        std::cout << "  strategy list           List available strategies" << std::endl;
+        std::cout << "  strategy execute -s STRATEGY" << std::endl << std::endl;
 
-    std::cout << "SOURCE COMMANDS:" << std::endl;
-    std::cout << "  source list             List all data sources" << std::endl << std::endl;
+        std::cout << "SOURCE COMMANDS:" << std::endl;
+        std::cout << "  source list             List all data sources" << std::endl << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # Load data from CSV" << std::endl;
+        std::cout << "  portfolio load -f data.csv -t GAZP -n Gazprom -s MOEX \\" << std::endl;
+        std::cout << "    -m close:4 -m volume:5" << std::endl << std::endl;
+        std::cout << "  # Create portfolio" << std::endl;
+        std::cout << "  portfolio portfolio create -n MyPortfolio --initial-capital 100000" << std::endl << std::endl;
+        std::cout << "  # Add instrument to portfolio" << std::endl;
+        std::cout << "  portfolio portfolio add-instrument -p MyPortfolio -t GAZP -w 0.5" << std::endl << std::endl;
+
+    } else if (topic == "load") {
+        // Детальная справка по load
+        std::cout << "COMMAND: load" << std::endl;
+        std::cout << "Load historical data from CSV file into database" << std::endl << std::endl;
+
+        std::cout << "USAGE:" << std::endl;
+        std::cout << "  portfolio load -f FILE -t ID -n NAME -s SOURCE [OPTIONS]" << std::endl << std::endl;
+
+        std::cout << "REQUIRED OPTIONS:" << std::endl;
+        std::cout << "  -f, --file FILE         Path to CSV file" << std::endl;
+        std::cout << "  -t, --instrument-id ID  Instrument identifier (ticker)" << std::endl;
+        std::cout << "  -n, --name NAME         Instrument name" << std::endl;
+        std::cout << "  -s, --source SOURCE     Data source name (e.g., MOEX, Yahoo)" << std::endl << std::endl;
+
+        std::cout << "OPTIONAL OPTIONS:" << std::endl;
+        std::cout << "  -T, --type TYPE         Instrument type (default: stock)" << std::endl;
+        std::cout << "                          Values: stock, index, bond, inflation, cbrate" << std::endl;
+        std::cout << "  -d, --delimiter CHAR    CSV delimiter (default: ,)" << std::endl;
+        std::cout << "  -m, --map MAPPING       Attribute mapping in format attr:col" << std::endl;
+        std::cout << "                          Example: -m close:4 -m volume:5" << std::endl;
+        std::cout << "  --date-column NUM       Date column index (default: 1)" << std::endl;
+        std::cout << "  --date-format FORMAT    Date format (default: %Y-%m-%d)" << std::endl;
+        std::cout << "  --skip-header BOOL      Skip CSV header (default: true)" << std::endl;
+        std::cout << "  --db TYPE               Database type (default: InMemory)" << std::endl;
+        std::cout << "                          Values: InMemory, SQLite" << std::endl;
+        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl << std::endl;
+
+        std::cout << "CSV FORMAT:" << std::endl;
+        std::cout << "  The CSV file should have the following structure:" << std::endl;
+        std::cout << "  - First row: headers (skipped by default)" << std::endl;
+        std::cout << "  - First column: date (configurable with --date-column)" << std::endl;
+        std::cout << "  - Other columns: attributes (close, open, volume, etc.)" << std::endl << std::endl;
+
+        std::cout << "  Example CSV:" << std::endl;
+        std::cout << "    date,open,high,low,close,volume" << std::endl;
+        std::cout << "    2024-01-01,100.0,105.0,99.0,104.0,1000000" << std::endl;
+        std::cout << "    2024-01-02,104.0,106.0,103.0,105.5,1100000" << std::endl << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # Load GAZP data from CSV (columns: date, close, volume)" << std::endl;
+        std::cout << "  portfolio load -f gazp.csv -t GAZP -n Gazprom -s MOEX \\" << std::endl;
+        std::cout << "    -m close:2 -m volume:3" << std::endl << std::endl;
+
+        std::cout << "  # Load with semicolon delimiter" << std::endl;
+        std::cout << "  portfolio load -f data.csv -t SBER -n Sberbank -s MOEX \\" << std::endl;
+        std::cout << "    -d ';' -m close:4" << std::endl << std::endl;
+
+        std::cout << "  # Load into SQLite database" << std::endl;
+        std::cout << "  portfolio load -f data.csv -t AAPL -n Apple -s Yahoo \\" << std::endl;
+        std::cout << "    --db SQLite --db-path portfolio.db -m close:5" << std::endl << std::endl;
+
+        std::cout << "  # Load bond data" << std::endl;
+        std::cout << "  portfolio load -f ofz.csv -t OFZ26207 -n \"OFZ 26207\" \\" << std::endl;
+        std::cout << "    -s MOEX -T bond -m close:4 -m yield:5" << std::endl << std::endl;
+
+    } else if (topic == "instrument") {
+        std::cout << "COMMAND: instrument" << std::endl;
+        std::cout << "Manage financial instruments" << std::endl << std::endl;
+
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list                    List all instruments" << std::endl;
+        std::cout << "  show -t ID              Show instrument details" << std::endl;
+        std::cout << "  delete -t ID            Delete instrument" << std::endl << std::endl;
+
+    } else if (topic == "portfolio") {
+        std::cout << "COMMAND: portfolio" << std::endl;
+        std::cout << "Manage investment portfolios" << std::endl << std::endl;
+
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  create -n NAME          Create new portfolio" << std::endl;
+        std::cout << "  list                    List all portfolios" << std::endl;
+        std::cout << "  show -n NAME            Show portfolio details" << std::endl;
+        std::cout << "  delete -n NAME          Delete portfolio" << std::endl;
+        std::cout << "  add-instrument          Add instrument to portfolio" << std::endl;
+        std::cout << "  remove-instrument       Remove instrument from portfolio" << std::endl << std::endl;
+
+    } else if (topic == "strategy") {
+        std::cout << "COMMAND: strategy" << std::endl;
+        std::cout << "Execute trading strategies" << std::endl << std::endl;
+
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list                    List available strategies" << std::endl;
+        std::cout << "  execute -s STRATEGY     Execute strategy" << std::endl << std::endl;
+
+    } else if (topic == "source") {
+        std::cout << "COMMAND: source" << std::endl;
+        std::cout << "Manage data sources" << std::endl << std::endl;
+
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list                    List all data sources" << std::endl << std::endl;
+
+    } else {
+        std::cout << "Unknown help topic: " << topic << std::endl;
+        std::cout << "Available topics: load, instrument, portfolio, strategy, source" << std::endl << std::endl;
+    }
 
     std::cout << std::string(70, '=') << "\n" << std::endl;
 }
@@ -124,7 +246,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrument(const Parsed
 }
 
 std::expected<void, std::string> CommandExecutor::executeInstrumentList(
-    const ParsedCommand& [[maybe_unused]] cmd)
+    const ParsedCommand& /*cmd*/)
 {
     if (!database_) {
         return std::unexpected("Database not initialized");
@@ -215,7 +337,7 @@ std::expected<void, std::string> CommandExecutor::savePortfolioToFile(
     }
 
     if (!info.instruments.empty()) {
-        double weight = 1.0 / info.instruments.size();
+        double weight = 1.0 / static_cast<double>(info.instruments.size());
         for (const auto& id : info.instruments) {
             info.weights[id] = weight;
         }
@@ -297,7 +419,7 @@ std::expected<void, std::string> CommandExecutor::executePortfolioCreate(const P
 }
 
 std::expected<void, std::string> CommandExecutor::executePortfolioList(
-    const ParsedCommand& [[maybe_unused]] cmd)
+    const ParsedCommand& /*cmd*/)
 {
     auto result = portfolioManager_->listPortfolios();
     if (!result) {
@@ -348,7 +470,7 @@ std::expected<void, std::string> CommandExecutor::executePortfolioAddInstrument(
     const ParsedCommand& cmd)
 {
     auto portfolioResult = getRequiredOption<std::string>(cmd, "portfolio");
-    auto instrumentResult = getRequiredOption<std::string>(cmd, "instrument");
+    auto instrumentResult = getRequiredOption<std::string>(cmd, "instrument-id");
 
     if (!portfolioResult) {
         return std::unexpected(portfolioResult.error());
@@ -381,7 +503,7 @@ std::expected<void, std::string> CommandExecutor::executePortfolioRemoveInstrume
     const ParsedCommand& cmd)
 {
     auto portfolioResult = getRequiredOption<std::string>(cmd, "portfolio");
-    auto instrumentResult = getRequiredOption<std::string>(cmd, "instrument");
+    auto instrumentResult = getRequiredOption<std::string>(cmd, "instrument-id");
 
     if (!portfolioResult) {
         return std::unexpected(portfolioResult.error());
@@ -417,6 +539,8 @@ std::expected<void, std::string> CommandExecutor::executeStrategy(const ParsedCo
 
     if (cmd.subcommand == "list") {
         return executeStrategyList(cmd);
+    } else if (cmd.subcommand == "requirements") {
+        return executeStrategyRequirements(cmd);
     } else if (cmd.subcommand == "execute") {
         return executeStrategyExecute(cmd);
     } else {
@@ -425,7 +549,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategy(const ParsedCo
 }
 
 std::expected<void, std::string> CommandExecutor::executeStrategyList(
-    const ParsedCommand& [[maybe_unused]] cmd)
+    const ParsedCommand& /*cmd*/)
 {
     std::cout << "Available strategies:" << std::endl;
     std::cout << "  BuyHold          - Simple buy-and-hold strategy" << std::endl;
@@ -433,8 +557,15 @@ std::expected<void, std::string> CommandExecutor::executeStrategyList(
     return {};
 }
 
+std::expected<void, std::string> CommandExecutor::executeStrategyRequirements(
+    const ParsedCommand& /*cmd*/)
+{
+    std::cout << "Strategy requirements not yet implemented." << std::endl;
+    return {};
+}
+
 std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
-    const ParsedCommand& [[maybe_unused]] cmd)
+    const ParsedCommand& /*cmd*/)
 {
     std::cout << "Strategy execution not yet implemented." << std::endl;
     return {};
@@ -459,7 +590,7 @@ std::expected<void, std::string> CommandExecutor::executeSource(const ParsedComm
 }
 
 std::expected<void, std::string> CommandExecutor::executeSourceList(
-    const ParsedCommand& [[maybe_unused]] cmd)
+    const ParsedCommand& /*cmd*/)
 {
     if (!database_) {
         return std::unexpected("Database not initialized");
@@ -487,7 +618,7 @@ std::expected<void, std::string> CommandExecutor::executeSourceList(
 // Load
 // ═════════════════════════════════════════════════════════════════════════════
 
-std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& cmd)
+std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& /*cmd*/)
 {
     std::cout << "Load command not yet fully implemented" << std::endl;
     return {};

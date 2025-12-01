@@ -13,50 +13,84 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
     result.command = argv[1];
 
     try {
-        // Определяем подкоманду для команд с субкомандами
-        int startIdx = 2;
-        if (argc > 2 && argv[2][0] != '-') {
-            result.subcommand = argv[2];
-            startIdx = 3;
-        }
-
-        // Проверяем глобальный запрос help (startIdx - 1!)
-        for (int i = startIdx - 1; i < argc; ++i) {
+        // ====================================================================
+        // Check for global help flag FIRST (before any processing)
+        // ====================================================================
+        for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "help" || arg == "--help" || arg == "-h") {
-                result.positional.push_back(result.command);
-                result.command = "help";
+                // If it's the first argument, it's the help command itself
+                if (i == 1) {
+                    result.command = "help";
+                    // Collect remaining args as topics
+                    for (int j = 2; j < argc; ++j) {
+                        result.positional.push_back(argv[j]);
+                    }
+                } else {
+                    // It's a help flag for another command
+                    result.positional.push_back(result.command);
+                    result.command = "help";
+                    // Add subcommand if present
+                    if (argc > 2 && argv[2][0] != '-') {
+                        result.positional.push_back(argv[2]);
+                    }
+                }
                 return result;
             }
         }
 
-        // Выбираем опции в зависимости от команды
+        // ====================================================================
+        // Determine if there's a subcommand
+        // ====================================================================
+        int startIdx = 2;
+        
+        // Commands that have subcommands
+        bool hasSubcommands = (result.command == "instrument" ||
+                              result.command == "portfolio" ||
+                              result.command == "strategy" ||
+                              result.command == "source");
+        
+        if (hasSubcommands && argc > 2 && argv[2][0] != '-') {
+            result.subcommand = argv[2];
+            startIdx = 3;
+        }
+
+        // ====================================================================
+        // Parse options based on command
+        // ====================================================================
+        
         if (result.command == "load") {
             auto desc = createLoadOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
+            
         } else if (result.command == "instrument") {
             auto desc = createInstrumentOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
+            
         } else if (result.command == "portfolio") {
             auto desc = createPortfolioOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
+            
         } else if (result.command == "strategy") {
             auto desc = createStrategyOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
+            
         } else if (result.command == "source") {
             auto desc = createSourceOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
+            
         } else if (result.command == "help" || result.command == "version") {
+            // These commands don't take options, only positional arguments
             for (int i = startIdx; i < argc; ++i) {
                 result.positional.push_back(argv[i]);
             }
@@ -114,6 +148,7 @@ po::options_description CommandLineParser::createPortfolioOptions() {
         ("initial-capital", po::value<double>()->default_value(100000.0), "Initial capital")
         ("description", po::value<std::string>(), "Portfolio description")
         ("max-weight", po::value<double>()->default_value(0.0), "Maximum weight")
+        ("weight,w", po::value<double>()->default_value(0.5), "Instrument weight")
         ("detail", po::bool_switch()->default_value(false), "Show detailed information")
         ("confirm", po::bool_switch()->default_value(false), "Confirm deletion")
         ("help,h", "Show help message");

@@ -4,6 +4,8 @@
 #include "IPortfolioDatabase.hpp"
 #include "IPortfolioManager.hpp"
 #include "Portfolio.hpp"
+#include "CSVDataSource.hpp"
+#include "PluginManager.hpp"
 #include <memory>
 #include <expected>
 
@@ -19,12 +21,16 @@ public:
 private:
     std::shared_ptr<IPortfolioDatabase> database_;
     std::unique_ptr<IPortfolioManager> portfolioManager_;
+    std::unique_ptr<PluginManager<IPortfolioDatabase>> pluginManager_;
+
+    // Database initialization
+    std::expected<void, std::string> ensureDatabase(
+        const std::string& dbType = "InMemory",
+        const std::string& dbPath = "");
 
     // Help & Version
-    std::expected<void, std::string> executeHelp(
-        [[maybe_unused]] const ParsedCommand& cmd);
-    std::expected<void, std::string> executeVersion(
-        [[maybe_unused]] const ParsedCommand& cmd);
+    std::expected<void, std::string> executeHelp(const ParsedCommand& cmd);
+    std::expected<void, std::string> executeVersion(const ParsedCommand& cmd);
     void printHelp(std::string_view topic = "");
     void printVersion() const;
 
@@ -33,16 +39,14 @@ private:
 
     // Instrument Management
     std::expected<void, std::string> executeInstrument(const ParsedCommand& cmd);
-    std::expected<void, std::string> executeInstrumentList(
-        [[maybe_unused]] const ParsedCommand& cmd);
+    std::expected<void, std::string> executeInstrumentList(const ParsedCommand& cmd);
     std::expected<void, std::string> executeInstrumentShow(const ParsedCommand& cmd);
     std::expected<void, std::string> executeInstrumentDelete(const ParsedCommand& cmd);
 
     // Portfolio Management - Persistence Layer
     std::expected<void, std::string> executePortfolio(const ParsedCommand& cmd);
     std::expected<void, std::string> executePortfolioCreate(const ParsedCommand& cmd);
-    std::expected<void, std::string> executePortfolioList(
-        [[maybe_unused]] const ParsedCommand& cmd);
+    std::expected<void, std::string> executePortfolioList(const ParsedCommand& cmd);
     std::expected<void, std::string> executePortfolioShow(const ParsedCommand& cmd);
     std::expected<void, std::string> executePortfolioDelete(const ParsedCommand& cmd);
     std::expected<void, std::string> executePortfolioAddInstrument(const ParsedCommand& cmd);
@@ -50,16 +54,13 @@ private:
 
     // Strategy Management
     std::expected<void, std::string> executeStrategy(const ParsedCommand& cmd);
-    std::expected<void, std::string> executeStrategyList(
-        [[maybe_unused]] const ParsedCommand& cmd);
+    std::expected<void, std::string> executeStrategyList(const ParsedCommand& cmd);
     std::expected<void, std::string> executeStrategyRequirements(const ParsedCommand& cmd);
-    std::expected<void, std::string> executeStrategyExecute(
-        [[maybe_unused]] const ParsedCommand& cmd);
+    std::expected<void, std::string> executeStrategyExecute(const ParsedCommand& cmd);
 
     // Source Management
     std::expected<void, std::string> executeSource(const ParsedCommand& cmd);
-    std::expected<void, std::string> executeSourceList(
-        [[maybe_unused]] const ParsedCommand& cmd);
+    std::expected<void, std::string> executeSourceList(const ParsedCommand& cmd);
 
     // Helper Methods
     template<typename T>
@@ -87,7 +88,8 @@ std::expected<T, std::string> CommandExecutor::getRequiredOption(
     try {
         return cmd.options.at(optionNameStr).as<T>();
     } catch (const std::exception& e) {
-        std::string error = std::string("Invalid value for option --") + optionNameStr + ": " + e.what();
+        std::string error = std::string("Invalid value for option --") + 
+                           optionNameStr + ": " + e.what();
         return std::unexpected(error);
     }
 }

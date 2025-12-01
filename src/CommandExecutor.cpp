@@ -13,6 +13,52 @@ CommandExecutor::CommandExecutor(std::shared_ptr<IPortfolioDatabase> db)
     if (!portfolioManager_) {
         portfolioManager_ = std::make_unique<PortfolioManager>();
     }
+    
+    // Инициализируем PluginManager
+    const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
+    std::string searchPath = pluginPath ? pluginPath : "./plugins";
+    pluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Database Initialization
+// ═════════════════════════════════════════════════════════════════════════════
+
+std::expected<void, std::string> CommandExecutor::ensureDatabase(
+    const std::string& dbType,
+    const std::string& dbPath)
+{
+    // Если база уже инициализирована, ничего не делаем
+    if (database_) {
+        return {};
+    }
+    
+    // Загружаем плагин БД
+    std::string pluginName;
+    std::string config;
+    
+    if (dbType == "InMemory") {
+        pluginName = "inmemory_db";
+        config = "";
+    } else if (dbType == "SQLite") {
+        pluginName = "sqlite_db";
+        if (dbPath.empty()) {
+            return std::unexpected("SQLite database requires --db-path option");
+        }
+        config = dbPath;
+    } else {
+        return std::unexpected("Unknown database type: " + dbType + 
+                              ". Supported types: InMemory, SQLite");
+    }
+    
+    auto dbResult = pluginManager_->loadDatabasePlugin(pluginName, config);
+    if (!dbResult) {
+        return std::unexpected("Failed to load database plugin '" + pluginName + 
+                              "': " + dbResult.error());
+    }
+    
+    database_ = dbResult.value();
+    return {};
 }
 
 std::expected<void, std::string> CommandExecutor::execute(const ParsedCommand& cmd)
@@ -618,9 +664,167 @@ std::expected<void, std::string> CommandExecutor::executeSourceList(
 // Load
 // ═════════════════════════════════════════════════════════════════════════════
 
-std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& /*cmd*/)
+std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& cmd)
 {
-    std::cout << "Load command not yet fully implemented" << std::endl;
+    // Получаем обязательные параметры
+    auto filePathResult = getRequiredOption<std::string>(cmd, "file");
+    if (!filePathResult) {
+        return std::unexpected(filePathResult.error());
+    }
+
+    auto instrumentIdResult = getRequiredOption<std::string>(cmd, "instrument-id");
+    if (!instrumentIdResult) {
+        return std::unexpected(instrumentIdResult.error());
+    }
+
+    auto nameResult = getRequiredOption<std::string>(cmd, "name");
+    if (!nameResult) {
+        return std::unexpected(nameResult.error());
+    }
+
+    auto sourceResult = getRequiredOption<std::string>(cmd, "source");
+    if (!sourceResult) {
+        return std::unexpected(sourceResult.error());
+    }
+
+    std::string filePath = filePathResult.value();
+    std::string instrumentId = instrumentIdResult.value();
+    std::string name = nameResult.value();
+    std::string source = sourceResult.value();
+
+    // Опциональные параметры
+    std::string type = cmd.options.at("type").as<std::string>();
+    char delimiter = cmd.options.at("delimiter").as<char>();
+    bool skipHeader = cmd.options.at("skip-header").as<bool>();
+    std::string dateFormat = cmd.options.at("date-format").as<std::string>();
+    std::size_t dateColumn = cmd.options.at("date-column").as<std::size_t>();
+
+    // Конвертируем индекс колонки с 1-based на 0-based
+    if (dateColumn == 0) {
+        return std::unexpected("Date column index must be >= 1 (columns indexed from 1)");
+    }
+    std::size_t dateColumnIndex = dateColumn - 1;
+
+    // Опции БД
+    std::string dbType = cmd.options.at("db").as<std::string>();
+    std::string dbPath;
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
+    }
+
+    // Инициализируем базу данных если необходимо
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
+    }
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "Loading Data from CSV" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Database type: " << dbType << std::endl;
+    if (!dbPath.empty()) {
+        std::cout << "Database path: " << dbPath << std::endl;
+    }
+    std::cout << std::endl;
+
+    // Создаем FileReader и CSVDataSource
+    auto fileReader = std::make_shared<FileReader>();
+    auto dataSource = std::make_shared<CSVDataSource>(
+        fileReader,
+        delimiter,
+        skipHeader,
+        dateFormat
+    );
+
+    // Инициализируем источник данных (dateSource теперь это индекс колонки)
+    std::string dateSourceStr = std::to_string(dateColumnIndex);
+    auto initResult = dataSource->initialize(filePath, dateSourceStr);
+    if (!initResult) {
+        return std::unexpected("Failed to initialize CSV data source: " + initResult.error());
+    }
+
+    // Добавляем запросы атрибутов из маппинга
+    if (cmd.options.count("map")) {
+        auto mappings = cmd.options.at("map").as<std::vector<std::string>>();
+        for (const auto& mapping : mappings) {
+            std::size_t pos = mapping.find(':');
+            if (pos == std::string::npos) {
+                return std::unexpected("Invalid mapping format: " + mapping + 
+                                     ". Expected format: attribute:column");
+            }
+            std::string attr = mapping.substr(0, pos);
+            std::string colStr = mapping.substr(pos + 1);
+
+            // Конвертируем 1-based индекс в 0-based
+            try {
+                std::size_t userColIndex = std::stoull(colStr);
+                if (userColIndex == 0) {
+                    return std::unexpected("Column index must be >= 1 in mapping: " + mapping);
+                }
+                std::size_t realColIndex = userColIndex - 1;
+                std::string realColStr = std::to_string(realColIndex);
+
+                auto addResult = dataSource->addAttributeRequest(attr, realColStr);
+                if (!addResult) {
+                    return std::unexpected("Failed to add attribute request: " + addResult.error());
+                }
+            } catch (const std::exception& e) {
+                return std::unexpected("Invalid column index in mapping: " + mapping);
+            }
+        }
+    } else {
+        return std::unexpected("No attribute mappings specified. Use -m option to map attributes.");
+    }
+
+    std::cout << "Loading data from: " << filePath << std::endl;
+    std::cout << "  Instrument: " << instrumentId << " (" << name << ")" << std::endl;
+    std::cout << "  Type: " << type << std::endl;
+    std::cout << "  Source: " << source << std::endl;
+    std::cout << "  Date column: " << dateColumn << " (1-based index)" << std::endl;
+    std::cout << "  Date format: " << dateFormat << std::endl;
+    std::cout << "  Delimiter: '" << delimiter << "'" << std::endl;
+    std::cout << "  Skip header: " << (skipHeader ? "yes" : "no") << std::endl;
+    std::cout << std::endl;
+
+    // Сохраняем инструмент
+    std::cout << "Saving instrument..." << std::endl;
+    auto saveInstResult = database_->saveInstrument(instrumentId, name, type, source);
+    if (!saveInstResult) {
+        return std::unexpected("Failed to save instrument: " + saveInstResult.error());
+    }
+    std::cout << "✓ Instrument saved" << std::endl << std::endl;
+
+    // Извлекаем данные
+    std::cout << "Extracting data from CSV..." << std::endl;
+    auto extractResult = dataSource->extract();
+    if (!extractResult) {
+        return std::unexpected("Failed to extract data: " + extractResult.error());
+    }
+
+    const auto& extractedData = extractResult.value();
+    std::cout << "✓ Data extracted successfully" << std::endl << std::endl;
+
+    // Сохраняем атрибуты в базу данных
+    std::cout << "Saving attributes to database..." << std::endl;
+    std::size_t totalSaved = 0;
+    for (const auto& [attrName, values] : extractedData) {
+        auto saveResult = database_->saveAttributes(instrumentId, attrName, source, values);
+        if (!saveResult) {
+            std::cerr << "Warning: Failed to save attribute '" << attrName
+                      << "': " << saveResult.error() << std::endl;
+        } else {
+            totalSaved += values.size();
+            std::cout << "  ✓ Saved attribute '" << attrName << "': " 
+                      << values.size() << " values" << std::endl;
+        }
+    }
+
+    std::cout << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Successfully saved " << totalSaved << " data points for "
+              << instrumentId << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
     return {};
 }
 

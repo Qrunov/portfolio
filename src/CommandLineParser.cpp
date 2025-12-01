@@ -43,13 +43,13 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
         // Determine if there's a subcommand
         // ====================================================================
         int startIdx = 2;
-        
+
         // Commands that have subcommands
         bool hasSubcommands = (result.command == "instrument" ||
-                              result.command == "portfolio" ||
-                              result.command == "strategy" ||
-                              result.command == "source");
-        
+                               result.command == "portfolio" ||
+                               result.command == "strategy" ||
+                               result.command == "source");
+
         if (hasSubcommands && argc > 2 && argv[2][0] != '-') {
             result.subcommand = argv[2];
             startIdx = 3;
@@ -58,37 +58,37 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
         // ====================================================================
         // Parse options based on command
         // ====================================================================
-        
+
         if (result.command == "load") {
             auto desc = createLoadOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
-            
+
         } else if (result.command == "instrument") {
             auto desc = createInstrumentOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
-            
+
         } else if (result.command == "portfolio") {
             auto desc = createPortfolioOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
-            
+
         } else if (result.command == "strategy") {
             auto desc = createStrategyOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
-            
+
         } else if (result.command == "source") {
             auto desc = createSourceOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
-            
+
         } else if (result.command == "help" || result.command == "version") {
             // These commands don't take options, only positional arguments
             for (int i = startIdx; i < argc; ++i) {
@@ -158,12 +158,15 @@ po::options_description CommandLineParser::createPortfolioOptions() {
 po::options_description CommandLineParser::createStrategyOptions() {
     po::options_description desc("Strategy options");
     desc.add_options()
-        ("strategy,s", po::value<std::string>(), "Strategy name")
+        ("strategy,s", po::value<std::string>(), "Strategy name (e.g., BuyHold)")
         ("portfolio,p", po::value<std::string>(), "Portfolio name")
+        ("from", po::value<std::string>(), "Start date (YYYY-MM-DD)")
+        ("to", po::value<std::string>(), "End date (YYYY-MM-DD)")
+        ("initial-capital", po::value<double>(), "Initial capital (overrides portfolio default)")
+        ("output,o", po::value<std::string>(), "Output file path for results")
+        ("db", po::value<std::string>()->default_value("InMemory"), "Database type (InMemory, SQLite)")
+        ("db-path", po::value<std::string>(), "Database file path (for SQLite)")
         ("param", po::value<std::string>(), "Parameter (name:value)")
-        ("from", po::value<std::string>(), "Start date")
-        ("to", po::value<std::string>(), "End date")
-        ("output,o", po::value<std::string>(), "Output file path")
         ("help,h", "Show help message");
     return desc;
 }

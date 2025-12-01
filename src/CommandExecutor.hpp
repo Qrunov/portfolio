@@ -3,6 +3,7 @@
 #include "CommandLineParser.hpp"
 #include "IPortfolioDatabase.hpp"
 #include "IPortfolioManager.hpp"
+#include "IPortfolioStrategy.hpp"
 #include "Portfolio.hpp"
 #include "CSVDataSource.hpp"
 #include "PluginManager.hpp"
@@ -14,7 +15,7 @@ namespace portfolio {
 class CommandExecutor {
 public:
     explicit CommandExecutor(std::shared_ptr<IPortfolioDatabase> db = nullptr);
-    ~CommandExecutor() = default;
+    ~CommandExecutor();  // Теперь определяем явно
 
     std::expected<void, std::string> execute(const ParsedCommand& cmd);
 
@@ -71,6 +72,10 @@ private:
     std::expected<Portfolio, std::string> loadPortfolioFromFile(const std::string& name);
     std::expected<void, std::string> savePortfolioToFile(const Portfolio& portfolio);
     void printPortfolioDetails(const PortfolioInfo& info) const;
+
+    // Strategy helpers
+    std::expected<TimePoint, std::string> parseDateString(std::string_view dateStr) const;
+    void printBacktestResults(const IPortfolioStrategy::BacktestResult& result) const;
 };
 
 template<typename T>
@@ -88,8 +93,8 @@ std::expected<T, std::string> CommandExecutor::getRequiredOption(
     try {
         return cmd.options.at(optionNameStr).as<T>();
     } catch (const std::exception& e) {
-        std::string error = std::string("Invalid value for option --") + 
-                           optionNameStr + ": " + e.what();
+        std::string error = std::string("Invalid value for option --") +
+                            optionNameStr + ": " + e.what();
         return std::unexpected(error);
     }
 }

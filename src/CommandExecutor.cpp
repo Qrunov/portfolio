@@ -2,8 +2,12 @@
 #include "PortfolioManager.hpp"
 #include "IPortfolioStrategy.hpp"
 #include <iostream>
-#include <chrono>
+#include <fstream>
 #include <iomanip>
+#include <chrono>
+#include <sstream>
+#include <algorithm>
+#include <dlfcn.h>
 
 namespace portfolio {
 
@@ -13,12 +17,74 @@ CommandExecutor::CommandExecutor(std::shared_ptr<IPortfolioDatabase> db)
     if (!portfolioManager_) {
         portfolioManager_ = std::make_unique<PortfolioManager>();
     }
-    
+
     // Инициализируем PluginManager
     const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
     std::string searchPath = pluginPath ? pluginPath : "./plugins";
     pluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
 }
+
+CommandExecutor::~CommandExecutor() {
+
+    database_.reset();
+
+    if (pluginManager_) {
+        pluginManager_->unloadAll();
+        pluginManager_.reset();
+    }
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Helper Methods
+// ═════════════════════════════════════════════════════════════════════════════
+
+std::expected<TimePoint, std::string> CommandExecutor::parseDateString(
+    std::string_view dateStr) const
+{
+    std::tm tm = {};
+    std::istringstream ss(dateStr.data());
+    ss >> std::get_time(&tm, "%Y-%m-%d");
+
+    if (ss.fail()) {
+        return std::unexpected("Failed to parse date: " + std::string(dateStr) +
+                               ". Expected format: YYYY-MM-DD");
+    }
+
+    tm.tm_hour = 0;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    tm.tm_isdst = -1;
+
+    auto timeT = std::mktime(&tm);
+    return std::chrono::system_clock::from_time_t(timeT);
+}
+
+void CommandExecutor::printBacktestResults(
+    const IPortfolioStrategy::BacktestResult& result) const
+{
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "BACKTEST RESULTS" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    std::cout << std::fixed << std::setprecision(2);
+
+    std::cout << "\nPerformance:" << std::endl;
+    std::cout << "  Final Portfolio Value:  $" << result.finalValue << std::endl;
+    std::cout << "  Total Return:           " << (result.totalReturn * 100.0) << "%" << std::endl;
+    std::cout << "  Annualized Return:      " << (result.annualizedReturn * 100.0) << "%" << std::endl;
+
+    std::cout << "\nRisk Metrics:" << std::endl;
+    std::cout << "  Volatility (Annual):    " << (result.volatility * 100.0) << "%" << std::endl;
+    std::cout << "  Maximum Drawdown:       " << result.maxDrawdown << "%" << std::endl;
+    std::cout << "  Sharpe Ratio:           " << result.sharpeRatio << std::endl;
+
+    std::cout << "\nTiming:" << std::endl;
+    std::cout << "  Trading Days:           " << result.tradingDays << std::endl;
+
+    std::cout << std::string(70, '=') << "\n" << std::endl;
+}
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Database Initialization
@@ -611,12 +677,178 @@ std::expected<void, std::string> CommandExecutor::executeStrategyRequirements(
 }
 
 std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
-    const ParsedCommand& /*cmd*/)
+    const ParsedCommand& cmd)
 {
-    std::cout << "Strategy execution not yet implemented." << std::endl;
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "STRATEGY EXECUTION" << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    // 1. Получаем обязательные параметры
+    auto strategyNameResult = getRequiredOption<std::string>(cmd, "strategy");
+    if (!strategyNameResult) {
+        return std::unexpected(strategyNameResult.error());
+    }
+    std::string strategyName = strategyNameResult.value();
+
+    auto portfolioNameResult = getRequiredOption<std::string>(cmd, "portfolio");
+    if (!portfolioNameResult) {
+        return std::unexpected(portfolioNameResult.error());
+    }
+    std::string portfolioName = portfolioNameResult.value();
+
+    auto fromDateStrResult = getRequiredOption<std::string>(cmd, "from");
+    if (!fromDateStrResult) {
+        return std::unexpected(fromDateStrResult.error());
+    }
+
+    auto toDateStrResult = getRequiredOption<std::string>(cmd, "to");
+    if (!toDateStrResult) {
+        return std::unexpected(toDateStrResult.error());
+    }
+
+    // 2. Парсим даты
+    auto fromDateResult = parseDateString(fromDateStrResult.value());
+    if (!fromDateResult) {
+        return std::unexpected(fromDateResult.error());
+    }
+    TimePoint fromDate = fromDateResult.value();
+
+    auto toDateResult = parseDateString(toDateStrResult.value());
+    if (!toDateResult) {
+        return std::unexpected(toDateResult.error());
+    }
+    TimePoint toDate = toDateResult.value();
+
+    if (toDate <= fromDate) {
+        return std::unexpected("End date must be after start date");
+    }
+
+    // 3. Загружаем портфель
+    std::cout << "Loading portfolio: " << portfolioName << "..." << std::endl;
+    auto portfolioInfoResult = portfolioManager_->getPortfolio(portfolioName);
+    if (!portfolioInfoResult) {
+        return std::unexpected("Failed to load portfolio: " + portfolioInfoResult.error());
+    }
+    const auto& portfolioInfo = portfolioInfoResult.value();
+    std::cout << "✓ Portfolio loaded: " << portfolioInfo.instruments.size()
+              << " instruments" << std::endl << std::endl;
+
+    // 4. Определяем начальный капитал
+    double initialCapital = portfolioInfo.initialCapital;
+    if (cmd.options.count("initial-capital")) {
+        initialCapital = cmd.options.at("initial-capital").as<double>();
+        std::cout << "Using custom initial capital: $" << initialCapital << std::endl;
+    }
+
+    if (initialCapital <= 0.0) {
+        return std::unexpected("Initial capital must be positive");
+    }
+
+    // 5. Инициализируем базу данных
+    std::string dbType = "InMemory";
+    std::string dbPath;
+    if (cmd.options.count("db")) {
+        dbType = cmd.options.at("db").as<std::string>();
+    }
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
+    }
+
+    std::cout << "Initializing database (" << dbType << ")..." << std::endl;
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
+    }
+    std::cout << "✓ Database initialized" << std::endl << std::endl;
+
+    // 6. Загружаем плагин стратегии напрямую через dlopen
+    std::cout << "Loading strategy plugin: " << strategyName << "..." << std::endl;
+
+    std::string pluginName = strategyName;
+    std::transform(pluginName.begin(), pluginName.end(), pluginName.begin(), ::tolower);
+    pluginName += "_strategy";
+
+    // Получаем путь к плагинам из переменной окружения или используем дефолтный
+    const char* envPluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
+    std::string pluginBasePath = envPluginPath ? envPluginPath : "./plugins";
+    std::string pluginPath = pluginBasePath + "/strategy/" + pluginName + ".so";
+
+    std::cout << "  Plugin path: " << pluginPath << std::endl;
+
+    // Очищаем предыдущие ошибки dlopen
+    dlerror();
+
+    void* handle = dlopen(pluginPath.c_str(), RTLD_LAZY);
+    if (!handle) {
+        const char* error = dlerror();
+        return std::unexpected("Failed to load strategy plugin: " +
+                               std::string(error ? error : "unknown error"));
+    }
+
+    // Получаем функции плагина через C API
+    using CreateStrategyFunc = portfolio::IPortfolioStrategy* (*)(const char*);
+    using DestroyStrategyFunc = void (*)(portfolio::IPortfolioStrategy*);
+
+    // Очищаем ошибки перед dlsym
+    dlerror();
+
+    auto createStrategy = reinterpret_cast<CreateStrategyFunc>(dlsym(handle, "createStrategy"));
+    const char* createError = dlerror();
+    if (createError) {
+        dlclose(handle);
+        return std::unexpected("Failed to find createStrategy symbol: " + std::string(createError));
+    }
+
+    auto destroyStrategy = reinterpret_cast<DestroyStrategyFunc>(dlsym(handle, "destroyStrategy"));
+    const char* destroyError = dlerror();
+    if (destroyError) {
+        dlclose(handle);
+        return std::unexpected("Failed to find destroyStrategy symbol: " + std::string(destroyError));
+    }
+
+    if (!createStrategy || !destroyStrategy) {
+        dlclose(handle);
+        return std::unexpected("Failed to find required plugin symbols");
+    }
+
+    // Создаем экземпляр стратегии
+    portfolio::IPortfolioStrategy* strategy = createStrategy("");
+    if (!strategy) {
+        dlclose(handle);
+        return std::unexpected("Failed to create strategy instance");
+    }
+
+    std::cout << "✓ Strategy loaded: " << strategy->getName()
+              << " v" << strategy->getVersion() << std::endl;
+    std::cout << "  Description: " << strategy->getDescription() << std::endl << std::endl;
+
+    // 7. Устанавливаем базу данных для стратегии
+    strategy->setDatabase(database_);
+
+    // 8. Создаем параметры портфеля
+    portfolio::IPortfolioStrategy::PortfolioParams params;
+    params.instrumentIds = portfolioInfo.instruments;
+    params.weights = portfolioInfo.weights;
+    params.initialCapital = initialCapital;
+
+    // 9. Выполняем бэктест
+    std::cout << "Running backtest..." << std::endl;
+    std::cout << "  Period: " << fromDateStrResult.value() << " to " << toDateStrResult.value() << std::endl;
+    std::cout << "  Initial Capital: $" << initialCapital << std::endl;
+    std::cout << std::string(70, '-') << std::endl << std::endl;
+
+    auto backtestResult = strategy->backtest(params, fromDate, toDate, initialCapital);
+
+    // Очищаем ресурсы
+    destroyStrategy(strategy);
+    dlclose(handle);
+
+    if (!backtestResult) {
+        return std::unexpected("Backtest failed: " + backtestResult.error());
+    }
+
     return {};
 }
-
 // ═════════════════════════════════════════════════════════════════════════════
 // Source Management
 // ═════════════════════════════════════════════════════════════════════════════

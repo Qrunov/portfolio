@@ -22,6 +22,8 @@ public:
         return "Simple buy and hold strategy - buy once and hold forever based on close prices";
     }
 
+    // setDatabase() уже реализован в BasePortfolioStrategy
+
     // Disable copy
     BuyHoldStrategy(const BuyHoldStrategy&) = delete;
     BuyHoldStrategy& operator=(const BuyHoldStrategy&) = delete;
@@ -64,6 +66,9 @@ private:
     std::map<std::string, double> entryPrices_;
     std::map<std::string, double> finalPrices_;
     std::vector<double> dailyValues_;
+
+    TimePoint startDate_;
+    TimePoint endDate_;
 };
 
 } // namespace portfolio

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "IPortfolioDatabase.hpp"
 #include <string>
 #include <memory>
 #include <expected>
@@ -23,6 +24,9 @@ public:
     virtual std::string_view getName() const noexcept = 0;
     virtual std::string_view getVersion() const noexcept = 0;
     virtual std::string_view getDescription() const noexcept = 0;
+
+    // Установка базы данных (нужна для загрузки исторических данных)
+    virtual void setDatabase(std::shared_ptr<IPortfolioDatabase> db) = 0;
 
     // Результаты бэктестирования
     struct BacktestResult {

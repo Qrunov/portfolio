@@ -9,7 +9,7 @@
 
 extern "C" {
 
-PLUGIN_API void* createStrategy(const char* [[maybe_unused]] config) {
+PLUGIN_API portfolio::IPortfolioStrategy* createStrategy(const char* [[maybe_unused]] config) {
     try {
         return new portfolio::BuyHoldStrategy();
     } catch (const std::exception& e) {
@@ -18,8 +18,8 @@ PLUGIN_API void* createStrategy(const char* [[maybe_unused]] config) {
     }
 }
 
-PLUGIN_API void destroyStrategy(void* strategy) {
-    delete static_cast<portfolio::BuyHoldStrategy*>(strategy);
+PLUGIN_API void destroyStrategy(portfolio::IPortfolioStrategy* strategy) {
+    delete strategy;
 }
 
 PLUGIN_API const char* getPluginName() {

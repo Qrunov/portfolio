@@ -1,8 +1,10 @@
 #pragma once
 
 #include "IPortfolioStrategy.hpp"
+#include "IPortfolioDatabase.hpp"
 #include <map>
 #include <vector>
+#include <memory>
 
 namespace portfolio {
 
@@ -13,6 +15,11 @@ namespace portfolio {
 class BasePortfolioStrategy : public IPortfolioStrategy {
 public:
     ~BasePortfolioStrategy() override = default;
+
+    // Реализация setDatabase из интерфейса
+    void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override {
+        database_ = db;
+    }
 
     // Template Method - основной алгоритм бэктестирования
     std::expected<BacktestResult, std::string> backtest(
@@ -27,6 +34,9 @@ public:
 
 protected:
     BasePortfolioStrategy() = default;
+
+    // Доступ к БД для наследников
+    std::shared_ptr<IPortfolioDatabase> database_;
 
     // ═════════════════════════════════════════════════════════════════════════════
     // Template Method Steps - Abstract Methods для переопределения в подклассах

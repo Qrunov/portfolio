@@ -7,6 +7,11 @@ namespace portfolio {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Template instantiation for DatabasePluginManager
 // ═══════════════════════════════════════════════════════════════════════════════
+/*
+TODO
+Эта специализация не нужна? Весь необходимый функционал реализован в PluginManager.hpp
+
+*/
 
 template <>
 std::string PluginManager<IPortfolioDatabase>::getCreateFunctionName() {

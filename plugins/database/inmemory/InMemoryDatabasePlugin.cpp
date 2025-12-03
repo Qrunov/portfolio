@@ -1,4 +1,4 @@
-#include "../../../include/InMemoryDatabase.hpp"
+#include "InMemoryDatabase.hpp"
 #include "../../../include/IPluginFactory.hpp"
 #include <iostream>
 

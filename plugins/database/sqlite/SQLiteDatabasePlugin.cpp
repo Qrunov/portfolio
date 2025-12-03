@@ -1,4 +1,4 @@
-#include "../../../include/SQLiteDatabase.hpp"
+#include "SQLiteDatabase.hpp"
 #include "../../../include/IPluginFactory.hpp"
 #include <iostream>
 

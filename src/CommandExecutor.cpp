@@ -105,39 +105,109 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
     if (database_) {
         return {};
     }
-    
-    // Загружаем плагин БД
+
+    // Определяем имя плагина на основе типа БД
     std::string pluginName;
     std::string config;
-    
-    /*TODO здесь переделать надо
-        По идее имя плагина надо получать у самого плагина. Список доступных
-        имен формировать при запуске, путем сканирования каталогов плагинов, загрузки найденных библиотек и получения у них имен
-        Эти имена должны выдаваться по команде оператора.
-        А здесь посто необходимо связывать указанное оператором имя с загруженной библиотекой
-    */
+
+    // Простое отображение типа -> имя плагина
     if (dbType == "InMemory") {
         pluginName = "inmemory_db";
         config = "";
     } else if (dbType == "SQLite") {
         pluginName = "sqlite_db";
         if (dbPath.empty()) {
-            return std::unexpected("SQLite database requires --db-path option");
+            return std::unexpected(
+                "SQLite database requires --db-path option"
+                );
         }
         config = dbPath;
     } else {
-        return std::unexpected("Unknown database type: " + dbType + 
-                              ". Supported types: InMemory, SQLite");
+        // Пытаемся найти плагин с таким именем напрямую
+        pluginName = dbType;
+        config = dbPath;
     }
-    
+
+    // Пытаемся загрузить плагин
     auto dbResult = pluginManager_->loadDatabasePlugin(pluginName, config);
+
     if (!dbResult) {
-        return std::unexpected("Failed to load database plugin '" + pluginName + 
-                              "': " + dbResult.error());
+        // Если не удалось загрузить, получаем список доступных плагинов
+        auto availablePlugins = pluginManager_->getAvailablePlugins("database");
+
+        std::string errorMsg = "Failed to load database plugin '" + pluginName +
+                               "': " + dbResult.error();
+
+        if (!availablePlugins.empty()) {
+            errorMsg += "\n\nAvailable database plugins:";
+            for (const auto& p : availablePlugins) {
+                errorMsg += "\n  - " + p.displayName + " v" + p.version +
+                            " (use: " + p.name + ")";
+            }
+        } else {
+            errorMsg += "\n\nNo database plugins found in: " +
+                        pluginManager_->getPluginPath();
+            errorMsg += "\nPlease check PORTFOLIO_PLUGIN_PATH environment variable.";
+        }
+
+        return std::unexpected(errorMsg);
     }
-    
+
     database_ = dbResult.value();
     return {};
+}
+
+// Добавляем новые вспомогательные методы
+
+std::expected<void, std::string> CommandExecutor::executeDatabaseList(
+    const ParsedCommand& /*cmd*/)
+{
+    auto availablePlugins = pluginManager_->getAvailablePlugins("database");
+
+    if (availablePlugins.empty()) {
+        std::cout << "No database plugins found." << std::endl;
+        return {};
+    }
+
+    std::cout << "\nAvailable Database Plugins:" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    for (const auto& plugin : availablePlugins) {
+        std::cout << "  " << plugin.displayName << " (v" << plugin.version << ")" << std::endl;
+        std::cout << "    System name: " << plugin.name << std::endl;
+        std::cout << std::endl;
+    }
+
+    return {};
+}
+
+std::expected<void, std::string> CommandExecutor::executeStrategyListUpdated(
+    const ParsedCommand& /*cmd*/)
+{
+    auto availablePlugins = pluginManager_->getAvailablePlugins("strategy");
+
+    if (availablePlugins.empty()) {
+        std::cout << "No strategy plugins found." << std::endl;
+        return {};
+    }
+
+    std::cout << "\nAvailable Strategy Plugins:" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    for (const auto& plugin : availablePlugins) {
+        std::cout << "  " << plugin.displayName << " (v" << plugin.version << ")" << std::endl;
+        std::cout << "    System name: " << plugin.name << std::endl;
+        std::cout << std::endl;
+    }
+
+    return {};
+}
+
+// Обновляем executeStrategyList для использования нового метода
+std::expected<void, std::string> CommandExecutor::executeStrategyList(
+    const ParsedCommand& cmd)
+{
+    return executeStrategyListUpdated(cmd);
 }
 
 std::expected<void, std::string> CommandExecutor::execute(const ParsedCommand& cmd)
@@ -673,14 +743,6 @@ std::expected<void, std::string> CommandExecutor::executeStrategy(const ParsedCo
     }
 }
 
-std::expected<void, std::string> CommandExecutor::executeStrategyList(
-    const ParsedCommand& /*cmd*/)
-{
-    std::cout << "Available strategies:" << std::endl;
-    std::cout << "  BuyHold          - Simple buy-and-hold strategy" << std::endl;
-    std::cout << "  DividendStrategy - Dividend-focused strategy (not yet implemented)" << std::endl;
-    return {};
-}
 
 std::expected<void, std::string> CommandExecutor::executeStrategyRequirements(
     const ParsedCommand& /*cmd*/)

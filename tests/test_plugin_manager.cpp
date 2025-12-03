@@ -14,7 +14,7 @@ protected:
         if (pluginPath) {
             manager = std::make_unique<PluginManager<IPortfolioDatabase>>(pluginPath);
         } else {
-            manager = std::make_unique<PluginManager<IPortfolioDatabase>>("./plugins");
+            manager = std::make_unique<PluginManager<IPortfolioDatabase>>("../plugins");
         }
     }
 

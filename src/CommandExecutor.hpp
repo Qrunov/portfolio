@@ -76,6 +76,9 @@ private:
     // Strategy helpers
     std::expected<TimePoint, std::string> parseDateString(std::string_view dateStr) const;
     void printBacktestResults(const IPortfolioStrategy::BacktestResult& result) const;
+
+    std::expected<void, std::string> executeDatabaseList(const ParsedCommand& cmd);
+    std::expected<void, std::string> executeStrategyListUpdated(const ParsedCommand& cmd);
 };
 
 template<typename T>

@@ -1,3 +1,4 @@
+// include/BasePortfolioStrategy.hpp
 #pragma once
 
 #include "IPortfolioStrategy.hpp"
@@ -77,11 +78,58 @@ protected:
         const TimePoint& endDate) = 0;
 
     // ═════════════════════════════════════════════════════════════════════════════
-    // Protected Helper Methods
+    // Protected Helper Methods - Общие методы для работы с дивидендами
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    // Структура для хранения дивидендной информации
+    struct DividendPayment {
+        TimePoint exDividendDate;  // Дата дивидендной отсечки
+        double amount;             // Размер дивиденда на акцию
+        std::string instrumentId;  // Идентификатор инструмента
+    };
+
+    // Загрузка дивидендов для инструмента
+    std::expected<std::vector<DividendPayment>, std::string> loadDividends(
+        std::string_view instrumentId,
+        const TimePoint& startDate,
+        const TimePoint& endDate);
+
+    // Загрузка дивидендов для всех инструментов портфеля
+    std::expected<void, std::string> loadAllDividends(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate);
+
+    // Расчет дивидендных выплат для портфеля
+    // instrumentHoldings: количество акций каждого инструмента
+    // currentDate: текущая дата для проверки выплат
+    // cashBalance: текущий денежный баланс (увеличивается на сумму дивидендов)
+    double processDividendPayments(
+        const std::map<std::string, double>& instrumentHoldings,
+        const TimePoint& currentDate,
+        double& cashBalance);
+
+    // Получить все дивидендные выплаты в хронологическом порядке
+    std::vector<DividendPayment> getAllDividendsSorted() const;
+
+    // Расчет дивидендных метрик
+    void calculateDividendMetrics(
+        BacktestResult& result,
+        double initialCapital,
+        std::int64_t tradingDays) const;
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Protected Data Members
     // ═════════════════════════════════════════════════════════════════════════════
 
     // Для хранения данных стратегии между шагами
     std::map<std::string, std::vector<std::pair<TimePoint, double>>> strategyData_;
+
+    // Дивиденды по инструментам
+    std::map<std::string, std::vector<DividendPayment>> dividendData_;
+
+    // Отслеживание выплаченных дивидендов
+    std::vector<std::pair<TimePoint, double>> dividendPaymentHistory_;
 };
 
 } // namespace portfolio

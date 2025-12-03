@@ -60,6 +60,7 @@ std::expected<TimePoint, std::string> CommandExecutor::parseDateString(
     return std::chrono::system_clock::from_time_t(timeT);
 }
 
+
 void CommandExecutor::printBacktestResults(
     const IPortfolioStrategy::BacktestResult& result) const
 {
@@ -71,11 +72,18 @@ void CommandExecutor::printBacktestResults(
 
     std::cout << "\nPerformance:" << std::endl;
     std::cout << "  Final Portfolio Value:  $" << result.finalValue << std::endl;
-    std::cout << "  Total Return:           " << (result.totalReturn * 100.0) << "%" << std::endl;
-    std::cout << "  Annualized Return:      " << (result.annualizedReturn * 100.0) << "%" << std::endl;
+    std::cout << "  Total Return:           " << result.totalReturn << "%" << std::endl;
+    std::cout << "  Price Return:           " << result.priceReturn << "%" << std::endl;
+    std::cout << "  Dividend Return:        " << result.dividendReturn << "%" << std::endl;
+    std::cout << "  Annualized Return:      " << result.annualizedReturn << "%" << std::endl;
+
+    std::cout << "\nDividend Information:" << std::endl;
+    std::cout << "  Total Dividends:        $" << result.totalDividends << std::endl;
+    std::cout << "  Dividend Yield (Annual): " << result.dividendYield << "%" << std::endl;
+    std::cout << "  Dividend Payments:      " << result.dividendPayments << std::endl;
 
     std::cout << "\nRisk Metrics:" << std::endl;
-    std::cout << "  Volatility (Annual):    " << (result.volatility * 100.0) << "%" << std::endl;
+    std::cout << "  Volatility (Annual):    " << result.volatility << "%" << std::endl;
     std::cout << "  Maximum Drawdown:       " << result.maxDrawdown << "%" << std::endl;
     std::cout << "  Sharpe Ratio:           " << result.sharpeRatio << std::endl;
 
@@ -84,7 +92,6 @@ void CommandExecutor::printBacktestResults(
 
     std::cout << std::string(70, '=') << "\n" << std::endl;
 }
-
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Database Initialization

@@ -1,3 +1,4 @@
+// plugins/strategy/buyhold/BuyHoldStrategy.hpp
 #pragma once
 
 #include "../../../include/BasePortfolioStrategy.hpp"
@@ -6,33 +7,21 @@
 
 namespace portfolio {
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Buy and Hold Strategy Implementation
-// ═══════════════════════════════════════════════════════════════════════════════
-
 class BuyHoldStrategy : public BasePortfolioStrategy {
 public:
     BuyHoldStrategy() = default;
     ~BuyHoldStrategy() override = default;
 
-    // Метаинформация стратегии
     std::string_view getName() const noexcept override { return "BuyHold"; }
-    std::string_view getVersion() const noexcept override { return "1.0.0"; }
+    std::string_view getVersion() const noexcept override { return "1.0.1"; }
     std::string_view getDescription() const noexcept override {
-        return "Simple buy and hold strategy - buy once and hold forever based on close prices";
+        return "Buy and hold strategy with dividend reinvestment support";
     }
 
-    // setDatabase() уже реализован в BasePortfolioStrategy
-
-    // Disable copy
     BuyHoldStrategy(const BuyHoldStrategy&) = delete;
     BuyHoldStrategy& operator=(const BuyHoldStrategy&) = delete;
 
 protected:
-    // ═════════════════════════════════════════════════════════════════════════════
-    // Template Method Step Implementations
-    // ═════════════════════════════════════════════════════════════════════════════
-
     std::expected<void, std::string> initializeStrategyParameters(
         const PortfolioParams& params) override;
 
@@ -65,7 +54,10 @@ private:
     PortfolioParams currentParams_;
     std::map<std::string, double> entryPrices_;
     std::map<std::string, double> finalPrices_;
+    std::map<std::string, double> instrumentHoldings_;  // Текущее количество акций
     std::vector<double> dailyValues_;
+    double cashBalance_ = 0.0;                          // Денежный остаток
+    bool reinvestDividends_ = true;                     // Реинвестировать дивиденды
 
     TimePoint startDate_;
     TimePoint endDate_;

@@ -1,3 +1,4 @@
+// include/IPortfolioStrategy.hpp
 #pragma once
 
 #include "IPortfolioDatabase.hpp"
@@ -30,13 +31,18 @@ public:
 
     // Результаты бэктестирования
     struct BacktestResult {
-        double totalReturn = 0.0;
-        double annualizedReturn = 0.0;
-        double volatility = 0.0;
-        double maxDrawdown = 0.0;
-        double sharpeRatio = 0.0;
-        double finalValue = 0.0;
-        std::int64_t tradingDays = 0;
+        double totalReturn = 0.0;              // Общая доходность (включая дивиденды)
+        double priceReturn = 0.0;              // Доходность от изменения цены
+        double dividendReturn = 0.0;           // Доходность от дивидендов
+        double annualizedReturn = 0.0;         // Годовая доходность
+        double volatility = 0.0;               // Волатильность
+        double maxDrawdown = 0.0;              // Максимальная просадка
+        double sharpeRatio = 0.0;              // Коэффициент Шарпа
+        double finalValue = 0.0;               // Финальная стоимость портфеля
+        double totalDividends = 0.0;           // Общая сумма полученных дивидендов
+        double dividendYield = 0.0;            // Дивидендная доходность (годовая)
+        std::int64_t tradingDays = 0;          // Количество торговых дней
+        std::int64_t dividendPayments = 0;     // Количество дивидендных выплат
     };
 
     // Параметры портфеля (для валидации)
@@ -44,6 +50,7 @@ public:
         std::vector<std::string> instrumentIds;
         std::map<std::string, double> weights;  // Веса инструментов
         double initialCapital = 0.0;
+        bool reinvestDividends = true;          // Реинвестировать дивиденды
     };
 
     // Основной метод бэктестирования

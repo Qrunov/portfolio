@@ -2,26 +2,13 @@
 # Strategy Plugins
 # ============================================================================
 
-# ----------------------------------------------------------------------------
-# BuyHold Strategy Plugin
-# ----------------------------------------------------------------------------
+message(STATUS "Configuring strategy plugins...")
 
-portfolio_add_plugin(
-    NAME buyhold_strategy
-    TYPE strategy
-    SOURCES
-        buyhold/BuyHoldStrategy.cpp
-        buyhold/BuyHoldStrategyPlugin.cpp
-)
+# Каждый плагин - отдельный модуль со своим CMakeLists.txt
+add_subdirectory(buyhold)
 
-# ----------------------------------------------------------------------------
-# Future strategies can be added here:
-# ----------------------------------------------------------------------------
+# Будущие стратегии можно легко добавить:
+# add_subdirectory(momentum)
+# add_subdirectory(meanreversion)
 
-# portfolio_add_plugin(
-#     NAME momentum_strategy
-#     TYPE strategy
-#     SOURCES
-#         momentum/MomentumStrategy.cpp
-#         momentum/MomentumStrategyPlugin.cpp
-# )
+message(STATUS "Strategy plugins configured")

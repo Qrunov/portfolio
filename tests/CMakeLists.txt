@@ -1,7 +1,8 @@
-#TODO тесты плагинов надо переместить в плагины
 # ============================================================================
-# Portfolio Management System - Tests
+# Portfolio Management System - Core Tests
 # ============================================================================
+
+message(STATUS "Configuring core tests...")
 
 # ----------------------------------------------------------------------------
 # Command Line Tests
@@ -31,15 +32,6 @@ portfolio_add_test(
 )
 
 # ----------------------------------------------------------------------------
-# InMemory Database Tests
-# ----------------------------------------------------------------------------
-
-portfolio_add_test(
-    NAME inmemory_database
-    SOURCES test_inmemory_database.cpp
-)
-
-# ----------------------------------------------------------------------------
 # Plugin Manager Tests
 # ----------------------------------------------------------------------------
 
@@ -49,35 +41,4 @@ portfolio_add_test(
     LIBRARIES ${CMAKE_DL_LIBS}
 )
 
-# ----------------------------------------------------------------------------
-# SQLite Database Tests
-# ----------------------------------------------------------------------------
-
-portfolio_add_test(
-    NAME sqlite_database
-    SOURCES test_sqlite_database.cpp
-    LIBRARIES ${SQLite3_LIBRARIES} ${CMAKE_DL_LIBS}
-)
-
-target_include_directories(test_sqlite_database PRIVATE
-    ${SQLite3_INCLUDE_DIRS}
-)
-
-# ----------------------------------------------------------------------------
-# BuyHold Strategy Tests
-# ----------------------------------------------------------------------------
-
-portfolio_add_test(
-    NAME buyhold_strategy
-    SOURCES test_buyhold_strategy.cpp
-    LIBRARIES ${CMAKE_DL_LIBS}
-)
-
-# ----------------------------------------------------------------------------
-# Test Resources
-# ----------------------------------------------------------------------------
-
-# Copy test data files if needed
-# file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/data
-#     DESTINATION ${CMAKE_BINARY_DIR}/tests
-# )
+message(STATUS "Core tests configured successfully")

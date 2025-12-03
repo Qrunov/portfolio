@@ -2,33 +2,10 @@
 # Database Plugins
 # ============================================================================
 
-# ----------------------------------------------------------------------------
-# InMemory Database Plugin
-# ----------------------------------------------------------------------------
+message(STATUS "Configuring database plugins...")
 
-portfolio_add_plugin(
-    NAME inmemory_db
-    TYPE database
-    SOURCES
-        inmemory/InMemoryDatabase.cpp
-        inmemory/InMemoryDatabasePlugin.cpp
-)
+# Каждый плагин - отдельный модуль со своим CMakeLists.txt
+add_subdirectory(inmemory)
+add_subdirectory(sqlite)
 
-# ----------------------------------------------------------------------------
-# SQLite Database Plugin
-# ----------------------------------------------------------------------------
-
-portfolio_add_plugin(
-    NAME sqlite_db
-    TYPE database
-    SOURCES
-        sqlite/SQLiteDatabase.cpp
-        sqlite/SQLiteDatabasePlugin.cpp
-    LIBRARIES
-        ${SQLite3_LIBRARIES}
-)
-
-# Add SQLite include directories
-target_include_directories(sqlite_db_plugin PRIVATE
-    ${SQLite3_INCLUDE_DIRS}
-)
+message(STATUS "Database plugins configured")

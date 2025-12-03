@@ -52,7 +52,6 @@ TEST_F(CommandExecutorTest, ExecuteInstrumentListEmpty) {
     auto result = executor->execute(cmd);
 
     // Может быть ошибка если database не инициализирован
-    // Проверяем что это просто graceful failure с сообщением об ошибке
     if (!result) {
         EXPECT_EQ(result.error(), "Database not initialized");
     }
@@ -87,11 +86,30 @@ TEST_F(CommandExecutorTest, ExecuteStrategyExecute) {
     ParsedCommand cmd;
     cmd.command = "strategy";
     cmd.subcommand = "execute";
+    // ✅ Не предоставляем обязательные параметры
 
     auto result = executor->execute(cmd);
 
-    // Strategy execution is not yet implemented
-    EXPECT_TRUE(result);
+    // ✅ Ожидаем ошибку из-за отсутствия обязательных параметров
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(result.error().empty());
+}
+
+TEST_F(CommandExecutorTest, ExecuteStrategyExecuteMissingStrategy) {
+    ParsedCommand cmd;
+    cmd.command = "strategy";
+    cmd.subcommand = "execute";
+
+    // ✅ Добавляем portfolio, но не strategy
+    cmd.options.insert({"portfolio", po::variable_value(std::string("TestPortfolio"), false)});
+    cmd.options.insert({"from", po::variable_value(std::string("2024-01-01"), false)});
+    cmd.options.insert({"to", po::variable_value(std::string("2024-12-31"), false)});
+
+    auto result = executor->execute(cmd);
+
+    // ✅ Ожидаем ошибку из-за отсутствия strategy
+    EXPECT_FALSE(result);
+    EXPECT_NE(result.error().find("strategy"), std::string::npos);
 }
 
 // ============================================================================
@@ -237,6 +255,27 @@ TEST_F(CommandLineParserTest, ParseSourceListCommand) {
     EXPECT_TRUE(result);
     EXPECT_EQ(result.value().command, "source");
     EXPECT_EQ(result.value().subcommand, "list");
+}
+
+TEST_F(CommandLineParserTest, ParseStrategyExecuteCommand) {
+    const char* argv[] = {
+        "portfolio", "strategy", "execute",
+        "-s", "BuyHold",
+        "-p", "MyPortfolio",
+        "--from", "2024-01-01",
+        "--to", "2024-12-31"
+    };
+    int argc = 11;
+
+    auto result = parser.parse(argc, const_cast<char**>(argv));
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(result.value().command, "strategy");
+    EXPECT_EQ(result.value().subcommand, "execute");
+    EXPECT_TRUE(result.value().options.count("strategy"));
+    EXPECT_TRUE(result.value().options.count("portfolio"));
+    EXPECT_TRUE(result.value().options.count("from"));
+    EXPECT_TRUE(result.value().options.count("to"));
 }
 
 int main(int argc, char** argv) {

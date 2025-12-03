@@ -4,7 +4,7 @@
 
 # ----------------------------------------------------------------------------
 # portfolio_add_plugin
-# 
+#
 # Helper function to create a plugin with standard settings
 #
 # Arguments:
@@ -17,7 +17,7 @@ function(portfolio_add_plugin)
     set(options "")
     set(oneValueArgs NAME TYPE)
     set(multiValueArgs SOURCES LIBRARIES)
-    
+
     cmake_parse_arguments(
         PLUGIN
         "${options}"
@@ -25,24 +25,24 @@ function(portfolio_add_plugin)
         "${multiValueArgs}"
         ${ARGN}
     )
-    
+
     # Validate arguments
     if(NOT PLUGIN_NAME)
         message(FATAL_ERROR "portfolio_add_plugin: NAME is required")
     endif()
-    
+
     if(NOT PLUGIN_TYPE)
         message(FATAL_ERROR "portfolio_add_plugin: TYPE is required")
     endif()
-    
+
     if(NOT PLUGIN_SOURCES)
         message(FATAL_ERROR "portfolio_add_plugin: SOURCES is required")
     endif()
-    
+
     # Create shared library
     set(target_name "${PLUGIN_NAME}_plugin")
     add_library(${target_name} SHARED ${PLUGIN_SOURCES})
-    
+
     # Set properties
     set_target_properties(${target_name} PROPERTIES
         PREFIX ""
@@ -51,23 +51,23 @@ function(portfolio_add_plugin)
         SUFFIX ".so"
         POSITION_INDEPENDENT_CODE ON
     )
-    
+
     # Include directories
     target_include_directories(${target_name} PRIVATE
         ${PORTFOLIO_INCLUDE_DIR}
     )
-    
+
     # Link libraries
     target_link_libraries(${target_name} PRIVATE
         portfolio_core
         ${PLUGIN_LIBRARIES}
     )
-    
+
     # Add to install
     install(TARGETS ${target_name}
         LIBRARY DESTINATION lib/portfolio/plugins/${PLUGIN_TYPE}
     )
-    
+
     message(STATUS "Added plugin: ${PLUGIN_NAME} (${PLUGIN_TYPE})")
 endfunction()
 
@@ -85,7 +85,7 @@ function(portfolio_add_test)
     set(options "")
     set(oneValueArgs NAME)
     set(multiValueArgs SOURCES LIBRARIES)
-    
+
     cmake_parse_arguments(
         TEST
         "${options}"
@@ -93,43 +93,44 @@ function(portfolio_add_test)
         "${multiValueArgs}"
         ${ARGN}
     )
-    
+
     if(NOT TEST_NAME)
         message(FATAL_ERROR "portfolio_add_test: NAME is required")
     endif()
-    
+
     if(NOT TEST_SOURCES)
         message(FATAL_ERROR "portfolio_add_test: SOURCES is required")
     endif()
-    
+
     # Create test executable
     set(target_name "test_${TEST_NAME}")
     add_executable(${target_name} ${TEST_SOURCES})
-    
+
     # Include directories
     target_include_directories(${target_name} PRIVATE
         ${PORTFOLIO_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
-    
-    # Link libraries
+
+    # ✅ ИСПРАВЛЕНО: Правильный порядок линковки GTest библиотек
+    # gtest должна идти ПЕРЕД gtest_main
     target_link_libraries(${target_name} PRIVATE
         portfolio_core
         portfolio_cli
-        gtest
-        gtest_main
+        GTest::gtest
+        GTest::gtest_main
         ${TEST_LIBRARIES}
     )
-    
+
     # Add test
     add_test(NAME ${TEST_NAME} COMMAND ${target_name})
-    
+
     # Set test environment
     set_tests_properties(${TEST_NAME} PROPERTIES
         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
         ENVIRONMENT "PORTFOLIO_PLUGIN_PATH=${PORTFOLIO_PLUGIN_OUTPUT_DIR}"
     )
-    
+
     message(STATUS "Added test: ${TEST_NAME}")
 endfunction()
 

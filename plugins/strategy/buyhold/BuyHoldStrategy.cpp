@@ -132,7 +132,7 @@ BuyHoldStrategy::initializePortfolio(
 {
     IPortfolioStrategy::BacktestResult result;
     result.finalValue = initialCapital;
-    cashBalance_ = 0.0;  // Изначально нет денежного остатка
+    cashBalance_ = 0.0;
 
     std::cout << std::endl;
     std::cout << "Initializing portfolio positions:" << std::endl;
@@ -140,6 +140,12 @@ BuyHoldStrategy::initializePortfolio(
 
     // Сохраняем количество акций для каждого инструмента
     instrumentHoldings_.clear();
+
+    // Получаем начальную дату (из первого инструмента)
+    TimePoint startDate;
+    if (!strategyData_.empty()) {
+        startDate = strategyData_.begin()->second.front().first;
+    }
 
     for (const auto& instrumentId : params.instrumentIds) {
         if (strategyData_.find(instrumentId) == strategyData_.end()) {
@@ -159,19 +165,47 @@ BuyHoldStrategy::initializePortfolio(
 
         // Покупаем по первой цене
         entryPrices_[instrumentId] = prices.front().second;
-
         double capitalForInstrument = initialCapital * weight;
-        double quantity = capitalForInstrument / entryPrices_[instrumentId];
+
+        // НОВОЕ: Учитываем лотность
+        std::int64_t lotSize = getEffectiveLotSize(instrumentId, startDate);
+        std::int64_t numLots = calculateAffordableLots(
+            capitalForInstrument,
+            entryPrices_[instrumentId],
+            lotSize
+            );
+
+        // Количество акций = количество лотов × размер лота
+        double quantity = static_cast<double>(numLots * lotSize);
+
+        // Если не можем купить ни одного лота, пропускаем инструмент
+        if (quantity <= 0.0) {
+            std::cout << "  " << instrumentId << ":" << std::endl;
+            std::cout << "    Warning: Insufficient capital to buy even one lot" << std::endl;
+            std::cout << "    Lot size: " << lotSize << std::endl;
+            std::cout << "    Price per lot: " << (entryPrices_[instrumentId] * lotSize) << std::endl;
+            std::cout << "    Capital allocated: " << capitalForInstrument << std::endl;
+            continue;
+        }
 
         instrumentHoldings_[instrumentId] = quantity;
+
+        // Добавляем неиспользованный капитал к cashBalance
+        double actualSpent = quantity * entryPrices_[instrumentId];
+        cashBalance_ += (capitalForInstrument - actualSpent);
 
         std::cout << "  " << instrumentId << ":" << std::endl;
         std::cout << "    Weight: " << (weight * 100) << "%" << std::endl;
         std::cout << "    Entry price: " << entryPrices_[instrumentId] << std::endl;
+        std::cout << "    Lot size: " << lotSize << std::endl;
         std::cout << "    Capital allocated: " << capitalForInstrument << std::endl;
+        std::cout << "    Lots purchased: " << numLots << std::endl;
         std::cout << "    Shares purchased: " << quantity << std::endl;
+        std::cout << "    Actual spent: " << actualSpent << std::endl;
+        std::cout << "    Unspent capital: " << (capitalForInstrument - actualSpent) << std::endl;
     }
 
+    std::cout << "\nTotal unspent capital (cash balance): " << cashBalance_ << std::endl;
     std::cout << std::endl;
     return result;
 }
@@ -214,6 +248,12 @@ BuyHoldStrategy::executeStrategy(
         if (reinvestDividends_ && dividendsToday > 0.0) {
             // Распределяем дивиденды пропорционально весам
             for (const auto& instrumentId : params.instrumentIds) {
+                // Пропускаем инструменты без позиций
+                if (instrumentHoldings_.find(instrumentId) == instrumentHoldings_.end() ||
+                    instrumentHoldings_[instrumentId] <= 0.0) {
+                    continue;
+                }
+
                 double weight = 1.0 / params.instrumentIds.size();
                 if (params.weights.count(instrumentId)) {
                     weight = params.weights.at(instrumentId);
@@ -225,17 +265,35 @@ BuyHoldStrategy::executeStrategy(
 
                 if (currentPrice > 0.0) {
                     double cashForInstrument = dividendsToday * weight;
-                    double additionalShares = cashForInstrument / currentPrice;
-                    instrumentHoldings_[instrumentId] += additionalShares;
+
+                    // НОВОЕ: Учитываем лотность при реинвестировании
+                    std::int64_t lotSize = getEffectiveLotSize(instrumentId, currentDate);
+                    std::int64_t numLots = calculateAffordableLots(
+                        cashForInstrument,
+                        currentPrice,
+                        lotSize
+                        );
+
+                    if (numLots > 0) {
+                        double additionalShares = static_cast<double>(numLots * lotSize);
+                        instrumentHoldings_[instrumentId] += additionalShares;
+
+                        // Вычитаем реально потраченную сумму
+                        double actualSpent = additionalShares * currentPrice;
+                        cashBalance_ -= actualSpent;
+                    }
                 }
             }
-            cashBalance_ -= dividendsToday;  // Потратили на покупку
         }
 
         // Расчет стоимости портфеля
         double portfolioValue = cashBalance_;  // Начинаем с денежного остатка
 
         for (const auto& instrumentId : params.instrumentIds) {
+            if (instrumentHoldings_.find(instrumentId) == instrumentHoldings_.end()) {
+                continue;
+            }
+
             const auto& prices = strategyData_[instrumentId];
             std::size_t priceIndex = std::min(day, prices.size() - 1);
             double currentPrice = prices[priceIndex].second;
@@ -252,14 +310,17 @@ BuyHoldStrategy::executeStrategy(
 
     // Сохраняем финальные цены
     for (const auto& instrumentId : params.instrumentIds) {
-        const auto& prices = strategyData_[instrumentId];
-        finalPrices_[instrumentId] = prices.back().second;
+        if (strategyData_.find(instrumentId) != strategyData_.end()) {
+            const auto& prices = strategyData_[instrumentId];
+            finalPrices_[instrumentId] = prices.back().second;
+        }
     }
 
     std::cout << "  ✓ Strategy executed over " << dailyValues_.size()
               << " trading days" << std::endl;
     std::cout << "  Initial value: " << initialCapital << std::endl;
     std::cout << "  Final value: " << result.finalValue << std::endl;
+    std::cout << "  Final cash balance: " << cashBalance_ << std::endl;
 
     // Расчет дивидендных метрик
     calculateDividendMetrics(result, initialCapital, static_cast<std::int64_t>(dailyValues_.size()));
@@ -360,10 +421,16 @@ std::expected<void, std::string> BuyHoldStrategy::calculateMetrics(
     // Вывод детальной информации
     std::cout << "Position details:" << std::endl;
     for (const auto& instrumentId : currentParams_.instrumentIds) {
+        if (entryPrices_.find(instrumentId) == entryPrices_.end() ||
+            finalPrices_.find(instrumentId) == finalPrices_.end()) {
+            continue;
+        }
+
         double entryPrice = entryPrices_[instrumentId];
         double finalPrice = finalPrices_[instrumentId];
         double priceReturn = ((finalPrice - entryPrice) / entryPrice) * 100.0;
-        double finalShares = instrumentHoldings_[instrumentId];
+        double finalShares = instrumentHoldings_.count(instrumentId) ?
+                                 instrumentHoldings_[instrumentId] : 0.0;
 
         std::cout << "  " << instrumentId << ":" << std::endl;
         std::cout << "    Entry price: " << entryPrice << std::endl;

@@ -78,7 +78,7 @@ protected:
         const TimePoint& endDate) = 0;
 
     // ═════════════════════════════════════════════════════════════════════════════
-    // Protected Helper Methods - Общие методы для работы с дивидендами
+    // Protected Helper Methods - Дивиденды
     // ═════════════════════════════════════════════════════════════════════════════
 
     // Структура для хранения дивидендной информации
@@ -101,9 +101,6 @@ protected:
         const TimePoint& endDate);
 
     // Расчет дивидендных выплат для портфеля
-    // instrumentHoldings: количество акций каждого инструмента
-    // currentDate: текущая дата для проверки выплат
-    // cashBalance: текущий денежный баланс (увеличивается на сумму дивидендов)
     double processDividendPayments(
         const std::map<std::string, double>& instrumentHoldings,
         const TimePoint& currentDate,
@@ -119,6 +116,45 @@ protected:
         std::int64_t tradingDays) const;
 
     // ═════════════════════════════════════════════════════════════════════════════
+    // Protected Helper Methods - Лотность
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    // Структура для хранения информации о лотности
+    struct LotSizeInfo {
+        TimePoint effectiveDate;  // Дата начала действия
+        std::int64_t lotSize;     // Размер лота
+        std::string instrumentId; // Идентификатор инструмента
+    };
+
+    // Загрузка истории лотности для инструмента
+    std::expected<std::vector<LotSizeInfo>, std::string> loadLotSizes(
+        std::string_view instrumentId,
+        const TimePoint& startDate,
+        const TimePoint& endDate);
+
+    // Загрузка лотности для всех инструментов портфеля
+    std::expected<void, std::string> loadAllLotSizes(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate);
+
+    // Получить действующий размер лота на определенную дату
+    std::int64_t getEffectiveLotSize(
+        std::string_view instrumentId,
+        const TimePoint& date) const;
+
+    // Округлить количество акций до целого количества лотов
+    double roundToLots(
+        double quantity,
+        std::int64_t lotSize) const;
+
+    // Рассчитать максимальное количество лотов, которое можно купить
+    std::int64_t calculateAffordableLots(
+        double availableCapital,
+        double pricePerShare,
+        std::int64_t lotSize) const;
+
+    // ═════════════════════════════════════════════════════════════════════════════
     // Protected Data Members
     // ═════════════════════════════════════════════════════════════════════════════
 
@@ -130,6 +166,9 @@ protected:
 
     // Отслеживание выплаченных дивидендов
     std::vector<std::pair<TimePoint, double>> dividendPaymentHistory_;
+
+    // Лотность по инструментам (отсортировано по дате)
+    std::map<std::string, std::vector<LotSizeInfo>> lotSizeData_;
 };
 
 } // namespace portfolio

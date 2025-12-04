@@ -227,6 +227,8 @@ std::expected<void, std::string> CommandExecutor::execute(const ParsedCommand& c
         return executeStrategy(cmd);
     } else if (cmd.command == "source") {
         return executeSource(cmd);
+    } else if (cmd.command == "plugin") {  // Новая команда
+        return executePlugin(cmd);
     } else {
         return std::unexpected("Unknown command: " + cmd.command);
     }
@@ -301,69 +303,61 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "SOURCE COMMANDS:" << std::endl;
         std::cout << "  source list             List all data sources" << std::endl << std::endl;
 
+        std::cout << "PLUGIN COMMANDS:" << std::endl;
+        std::cout << "  plugin list             List all available plugins" << std::endl;
+        std::cout << "  plugin list -t TYPE     List plugins of specific type" << std::endl;
+        std::cout << "                          Types: database, strategy" << std::endl << std::endl;
+
         std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # List all available plugins" << std::endl;
+        std::cout << "  portfolio plugin list" << std::endl << std::endl;
+
+        std::cout << "  # List only database plugins" << std::endl;
+        std::cout << "  portfolio plugin list -t database" << std::endl << std::endl;
+
         std::cout << "  # Load data from CSV" << std::endl;
         std::cout << "  portfolio load -f data.csv -t GAZP -n Gazprom -s MOEX \\" << std::endl;
         std::cout << "    -m close:4 -m volume:5" << std::endl << std::endl;
-        std::cout << "  # Create portfolio" << std::endl;
-        std::cout << "  portfolio portfolio create -n MyPortfolio --initial-capital 100000" << std::endl << std::endl;
-        std::cout << "  # Add instrument to portfolio" << std::endl;
-        std::cout << "  portfolio portfolio add-instrument -p MyPortfolio -t GAZP -w 0.5" << std::endl << std::endl;
 
-    } else if (topic == "load") {
-        // Детальная справка по load
-        std::cout << "COMMAND: load" << std::endl;
-        std::cout << "Load historical data from CSV file into database" << std::endl << std::endl;
+    } else if (topic == "plugin") {
+        // Детальная справка по plugin
+        std::cout << "COMMAND: plugin" << std::endl;
+        std::cout << "Manage and inspect available plugins" << std::endl << std::endl;
 
         std::cout << "USAGE:" << std::endl;
-        std::cout << "  portfolio load -f FILE -t ID -n NAME -s SOURCE [OPTIONS]" << std::endl << std::endl;
+        std::cout << "  portfolio plugin list [OPTIONS]" << std::endl << std::endl;
 
-        std::cout << "REQUIRED OPTIONS:" << std::endl;
-        std::cout << "  -f, --file FILE         Path to CSV file" << std::endl;
-        std::cout << "  -t, --instrument-id ID  Instrument identifier (ticker)" << std::endl;
-        std::cout << "  -n, --name NAME         Instrument name" << std::endl;
-        std::cout << "  -s, --source SOURCE     Data source name (e.g., MOEX, Yahoo)" << std::endl << std::endl;
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list                    List all available plugins" << std::endl << std::endl;
 
-        std::cout << "OPTIONAL OPTIONS:" << std::endl;
-        std::cout << "  -T, --type TYPE         Instrument type (default: stock)" << std::endl;
-        std::cout << "                          Values: stock, index, bond, inflation, cbrate" << std::endl;
-        std::cout << "  -d, --delimiter CHAR    CSV delimiter (default: ,)" << std::endl;
-        std::cout << "  -m, --map MAPPING       Attribute mapping in format attr:col" << std::endl;
-        std::cout << "                          Example: -m close:4 -m volume:5" << std::endl;
-        std::cout << "  --date-column NUM       Date column index (default: 1)" << std::endl;
-        std::cout << "  --date-format FORMAT    Date format (default: %Y-%m-%d)" << std::endl;
-        std::cout << "  --skip-header BOOL      Skip CSV header (default: true)" << std::endl;
-        std::cout << "  --db TYPE               Database type (default: InMemory)" << std::endl;
-        std::cout << "                          Values: InMemory, SQLite" << std::endl;
-        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl << std::endl;
+        std::cout << "OPTIONS:" << std::endl;
+        std::cout << "  -t, --type TYPE         Filter by plugin type" << std::endl;
+        std::cout << "                          Available types: database, strategy" << std::endl << std::endl;
 
-        std::cout << "CSV FORMAT:" << std::endl;
-        std::cout << "  The CSV file should have the following structure:" << std::endl;
-        std::cout << "  - First row: headers (skipped by default)" << std::endl;
-        std::cout << "  - First column: date (configurable with --date-column)" << std::endl;
-        std::cout << "  - Other columns: attributes (close, open, volume, etc.)" << std::endl << std::endl;
+        std::cout << "PLUGIN TYPES:" << std::endl;
+        std::cout << "  database                Database storage plugins" << std::endl;
+        std::cout << "                          Examples: InMemoryDatabase, SQLiteDatabase" << std::endl;
+        std::cout << "  strategy                Trading strategy plugins" << std::endl;
+        std::cout << "                          Examples: BuyHold, Momentum" << std::endl << std::endl;
 
-        std::cout << "  Example CSV:" << std::endl;
-        std::cout << "    date,open,high,low,close,volume" << std::endl;
-        std::cout << "    2024-01-01,100.0,105.0,99.0,104.0,1000000" << std::endl;
-        std::cout << "    2024-01-02,104.0,106.0,103.0,105.5,1100000" << std::endl << std::endl;
+        std::cout << "PLUGIN PATH:" << std::endl;
+        std::cout << "  The system searches for plugins in the directory specified by" << std::endl;
+        std::cout << "  the PORTFOLIO_PLUGIN_PATH environment variable." << std::endl;
+        std::cout << "  Default: ./plugins" << std::endl << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  # Load GAZP data from CSV (columns: date, close, volume)" << std::endl;
-        std::cout << "  portfolio load -f gazp.csv -t GAZP -n Gazprom -s MOEX \\" << std::endl;
-        std::cout << "    -m close:2 -m volume:3" << std::endl << std::endl;
+        std::cout << "  # List all plugins" << std::endl;
+        std::cout << "  portfolio plugin list" << std::endl << std::endl;
 
-        std::cout << "  # Load with semicolon delimiter" << std::endl;
-        std::cout << "  portfolio load -f data.csv -t SBER -n Sberbank -s MOEX \\" << std::endl;
-        std::cout << "    -d ';' -m close:4" << std::endl << std::endl;
+        std::cout << "  # List only database plugins" << std::endl;
+        std::cout << "  portfolio plugin list -t database" << std::endl << std::endl;
 
-        std::cout << "  # Load into SQLite database" << std::endl;
-        std::cout << "  portfolio load -f data.csv -t AAPL -n Apple -s Yahoo \\" << std::endl;
-        std::cout << "    --db SQLite --db-path portfolio.db -m close:5" << std::endl << std::endl;
+        std::cout << "  # List only strategy plugins" << std::endl;
+        std::cout << "  portfolio plugin list -t strategy" << std::endl << std::endl;
 
-        std::cout << "  # Load bond data" << std::endl;
-        std::cout << "  portfolio load -f ofz.csv -t OFZ26207 -n \"OFZ 26207\" \\" << std::endl;
-        std::cout << "    -s MOEX -T bond -m close:4 -m yield:5" << std::endl << std::endl;
+        std::cout << "  # Set custom plugin path" << std::endl;
+        std::cout << "  export PORTFOLIO_PLUGIN_PATH=/path/to/plugins" << std::endl;
+        std::cout << "  portfolio plugin list" << std::endl << std::endl;
 
     } else if (topic == "instrument") {
         std::cout << "COMMAND: instrument" << std::endl;
@@ -1132,6 +1126,93 @@ std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedComman
               << instrumentId << std::endl;
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
+    return {};
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Plugin Management
+// ═════════════════════════════════════════════════════════════════════════════
+
+std::expected<void, std::string> CommandExecutor::executePlugin(const ParsedCommand& cmd)
+{
+    if (cmd.subcommand.empty()) {
+        std::cout << "Use 'portfolio plugin --help' for usage information" << std::endl;
+        return {};
+    }
+
+    if (cmd.subcommand == "list") {
+        return executePluginList(cmd);
+    } else if (cmd.subcommand == "info") {
+        return executePluginInfo(cmd);
+    } else {
+        return std::unexpected("Unknown plugin subcommand: " + cmd.subcommand);
+    }
+}
+
+std::expected<void, std::string> CommandExecutor::executePluginList(
+    const ParsedCommand& cmd)
+{
+    // Получаем фильтр по типу если указан
+    std::string typeFilter;
+    if (cmd.options.count("type")) {
+        typeFilter = cmd.options.at("type").as<std::string>();
+    }
+
+    // Получаем список доступных плагинов
+    auto availablePlugins = pluginManager_->getAvailablePlugins(typeFilter);
+
+    if (availablePlugins.empty()) {
+        if (typeFilter.empty()) {
+            std::cout << "No plugins found." << std::endl;
+            std::cout << "\nPlugin search path: " << pluginManager_->getPluginPath() << std::endl;
+            std::cout << "Set PORTFOLIO_PLUGIN_PATH environment variable to change the search path." << std::endl;
+        } else {
+            std::cout << "No '" << typeFilter << "' plugins found." << std::endl;
+        }
+        return {};
+    }
+
+    // Группируем плагины по типу
+    std::map<std::string, std::vector<PluginManager<IPortfolioDatabase>::AvailablePlugin>> pluginsByType;
+    for (const auto& plugin : availablePlugins) {
+        pluginsByType[plugin.type].push_back(plugin);
+    }
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "Available Plugins" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Plugin path: " << pluginManager_->getPluginPath() << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    for (const auto& [type, plugins] : pluginsByType) {
+        // Красиво форматируем тип
+        std::string typeTitle = type;
+        typeTitle[0] = std::toupper(typeTitle[0]);
+
+        std::cout << typeTitle << " Plugins (" << plugins.size() << "):" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+
+        for (const auto& plugin : plugins) {
+            std::cout << "  Name:        " << plugin.displayName << std::endl;
+            std::cout << "  Version:     " << plugin.version << std::endl;
+            std::cout << "  System name: " << plugin.name << std::endl;
+            std::cout << "  Path:        " << plugin.path << std::endl;
+            std::cout << std::endl;
+        }
+    }
+
+    std::cout << "Total: " << availablePlugins.size() << " plugin(s)" << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    return {};
+}
+
+std::expected<void, std::string> CommandExecutor::executePluginInfo(
+    const ParsedCommand& cmd)
+{
+    // Эта команда может быть расширена для показа детальной информации о конкретном плагине
+    std::cout << "Plugin info command not yet implemented." << std::endl;
+    std::cout << "Use 'portfolio plugin list' to see available plugins." << std::endl;
     return {};
 }
 

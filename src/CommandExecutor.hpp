@@ -63,6 +63,11 @@ private:
     std::expected<void, std::string> executeSource(const ParsedCommand& cmd);
     std::expected<void, std::string> executeSourceList(const ParsedCommand& cmd);
 
+    // Plugin Management
+    std::expected<void, std::string> executePlugin(const ParsedCommand& cmd);
+    std::expected<void, std::string> executePluginList(const ParsedCommand& cmd);
+    std::expected<void, std::string> executePluginInfo(const ParsedCommand& cmd);
+
     // Helper Methods
     template<typename T>
     std::expected<T, std::string> getRequiredOption(
@@ -79,6 +84,9 @@ private:
 
     std::expected<void, std::string> executeDatabaseList(const ParsedCommand& cmd);
     std::expected<void, std::string> executeStrategyListUpdated(const ParsedCommand& cmd);
+
+
+
 };
 
 template<typename T>

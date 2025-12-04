@@ -27,9 +27,10 @@ public:
     static po::options_description createPortfolioOptions();
     static po::options_description createStrategyOptions();
     static po::options_description createSourceOptions();
+    static po::options_description createPluginOptions();  // Новая функция
 
 private:
     po::options_description createCommonOptions();
 };
 
-} // namespace Portfolio
+} // namespace portfolio

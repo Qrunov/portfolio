@@ -3,7 +3,6 @@
 #include <sstream>
 
 namespace portfolio {
-
 std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, char* argv[]) {
     if (argc < 2) {
         return std::unexpected("No command specified. Use 'portfolio help' for usage information.");
@@ -19,18 +18,14 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "help" || arg == "--help" || arg == "-h") {
-                // If it's the first argument, it's the help command itself
                 if (i == 1) {
                     result.command = "help";
-                    // Collect remaining args as topics
                     for (int j = 2; j < argc; ++j) {
                         result.positional.push_back(argv[j]);
                     }
                 } else {
-                    // It's a help flag for another command
                     result.positional.push_back(result.command);
                     result.command = "help";
-                    // Add subcommand if present
                     if (argc > 2 && argv[2][0] != '-') {
                         result.positional.push_back(argv[2]);
                     }
@@ -48,7 +43,8 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
         bool hasSubcommands = (result.command == "instrument" ||
                                result.command == "portfolio" ||
                                result.command == "strategy" ||
-                               result.command == "source");
+                               result.command == "source" ||
+                               result.command == "plugin");  // Добавили plugin
 
         if (hasSubcommands && argc > 2 && argv[2][0] != '-') {
             result.subcommand = argv[2];
@@ -89,8 +85,13 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
 
+        } else if (result.command == "plugin") {  // Новая команда
+            auto desc = createPluginOptions();
+            std::vector<std::string> args(argv + startIdx, argv + argc);
+            po::store(po::command_line_parser(args).options(desc).run(), result.options);
+            po::notify(result.options);
+
         } else if (result.command == "help" || result.command == "version") {
-            // These commands don't take options, only positional arguments
             for (int i = startIdx; i < argc; ++i) {
                 result.positional.push_back(argv[i]);
             }
@@ -183,6 +184,13 @@ po::options_description CommandLineParser::createCommonOptions() {
     desc.add_options()
         ("help,h", "Show help message")
         ("verbose,v", po::bool_switch()->default_value(false), "Verbose output");
+    return desc;
+}
+po::options_description CommandLineParser::createPluginOptions() {
+    po::options_description desc("Plugin options");
+    desc.add_options()
+        ("type,t", po::value<std::string>(), "Filter by plugin type (database, strategy)")
+        ("help,h", "Show help message");
     return desc;
 }
 

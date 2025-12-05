@@ -68,6 +68,8 @@ private:
     std::expected<void, std::string> executePluginList(const ParsedCommand& cmd);
     std::expected<void, std::string> executePluginInfo(const ParsedCommand& cmd);
 
+
+
     // Helper Methods
     template<typename T>
     std::expected<T, std::string> getRequiredOption(
@@ -81,6 +83,7 @@ private:
     // Strategy helpers
     std::expected<TimePoint, std::string> parseDateString(std::string_view dateStr) const;
     void printBacktestResults(const IPortfolioStrategy::BacktestResult& result) const;
+    void printTaxResults(const IPortfolioStrategy::BacktestResult& result) const;
 
     std::expected<void, std::string> executeDatabaseList(const ParsedCommand& cmd);
     std::expected<void, std::string> executeStrategyListUpdated(const ParsedCommand& cmd);

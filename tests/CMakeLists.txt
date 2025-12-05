@@ -41,4 +41,13 @@ portfolio_add_test(
     LIBRARIES ${CMAKE_DL_LIBS}
 )
 
+# ----------------------------------------------------------------------------
+# Tax Calculator Tests
+# ----------------------------------------------------------------------------
+
+portfolio_add_test(
+    NAME tax_calculator
+    SOURCES test_tax_calculator.cpp
+)
+
 message(STATUS "Core tests configured successfully")

@@ -7,7 +7,8 @@ set(PORTFOLIO_CORE_SOURCES
     CSVDataSource.cpp
     BasePortfolioStrategy.cpp
     PortfolioManager.cpp
-#    InMemoryDatabase.cpp
+    TaxCalculator.cpp
+    #    InMemoryDatabase.cpp
 )
 
 add_library(portfolio_core STATIC ${PORTFOLIO_CORE_SOURCES})

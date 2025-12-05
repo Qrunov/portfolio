@@ -1,6 +1,7 @@
 #include "CommandExecutor.hpp"
 #include "PortfolioManager.hpp"
 #include "IPortfolioStrategy.hpp"
+#include "TaxCalculator.hpp"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -752,7 +753,10 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     std::cout << "STRATEGY EXECUTION" << std::endl;
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
+    // ========================================================================
     // 1. Получаем обязательные параметры
+    // ========================================================================
+
     auto strategyNameResult = getRequiredOption<std::string>(cmd, "strategy");
     if (!strategyNameResult) {
         return std::unexpected(strategyNameResult.error());
@@ -775,7 +779,10 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
         return std::unexpected(toDateStrResult.error());
     }
 
+    // ========================================================================
     // 2. Парсим даты
+    // ========================================================================
+
     auto fromDateResult = parseDateString(fromDateStrResult.value());
     if (!fromDateResult) {
         return std::unexpected(fromDateResult.error());
@@ -792,7 +799,10 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
         return std::unexpected("End date must be after start date");
     }
 
+    // ========================================================================
     // 3. Загружаем портфель
+    // ========================================================================
+
     std::cout << "Loading portfolio: " << portfolioName << "..." << std::endl;
     auto portfolioInfoResult = portfolioManager_->getPortfolio(portfolioName);
     if (!portfolioInfoResult) {
@@ -802,7 +812,10 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     std::cout << "✓ Portfolio loaded: " << portfolioInfo.instruments.size()
               << " instruments" << std::endl << std::endl;
 
+    // ========================================================================
     // 4. Определяем начальный капитал
+    // ========================================================================
+
     double initialCapital = portfolioInfo.initialCapital;
     if (cmd.options.count("initial-capital")) {
         initialCapital = cmd.options.at("initial-capital").as<double>();
@@ -813,7 +826,10 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
         return std::unexpected("Initial capital must be positive");
     }
 
+    // ========================================================================
     // 5. Инициализируем базу данных
+    // ========================================================================
+
     std::string dbType = "InMemory";
     std::string dbPath;
     if (cmd.options.count("db")) {
@@ -830,23 +846,86 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     }
     std::cout << "✓ Database initialized" << std::endl << std::endl;
 
-    // 6. Загружаем плагин стратегии напрямую через dlopen
+    // ========================================================================
+    // 6. Создаем налоговый калькулятор (если включено)
+    // ========================================================================
+
+    std::shared_ptr<TaxCalculator> taxCalc;
+
+    if (cmd.options.count("enable-tax") && cmd.options.at("enable-tax").as<bool>()) {
+        std::cout << "Configuring tax calculator..." << std::endl;
+
+        taxCalc = std::make_shared<TaxCalculator>();
+
+        // Настраиваем ставку НДФЛ
+        if (cmd.options.count("ndfl-rate")) {
+            double rate = cmd.options.at("ndfl-rate").as<double>();
+            if (rate < 0.0 || rate > 1.0) {
+                return std::unexpected("NDFL rate must be between 0 and 1");
+            }
+            taxCalc->setNdflRate(rate);
+            std::cout << "  NDFL rate: " << (rate * 100) << "%" << std::endl;
+        } else {
+            std::cout << "  NDFL rate: 13% (default)" << std::endl;
+        }
+
+        // Настраиваем льготу 3+ года
+        if (cmd.options.count("no-long-term-exemption") &&
+            cmd.options.at("no-long-term-exemption").as<bool>()) {
+            taxCalc->setLongTermExemption(false);
+            std::cout << "  Long-term exemption: disabled" << std::endl;
+        } else {
+            taxCalc->setLongTermExemption(true);
+            std::cout << "  Long-term exemption: enabled (3+ years)" << std::endl;
+        }
+
+        if (cmd.options.count("lot-method")) {
+            std::string method = cmd.options.at("lot-method").as<std::string>();
+
+            if (method == "FIFO") {
+                taxCalc->setLotSelectionMethod(LotSelectionMethod::FIFO);
+            } else if (method == "LIFO") {
+                taxCalc->setLotSelectionMethod(LotSelectionMethod::LIFO);
+            } else if (method == "MinTax" || method == "MinimizeTax") {
+                taxCalc->setLotSelectionMethod(LotSelectionMethod::MinimizeTax);
+            } else {
+                return std::unexpected("Invalid lot selection method: " + method +
+                                       ". Valid options: FIFO, LIFO, MinTax");
+            }
+        }
+        // Импортируем убытки с прошлого года
+        if (cmd.options.count("import-losses")) {
+            double losses = cmd.options.at("import-losses").as<double>();
+            if (losses < 0.0) {
+                return std::unexpected("Import losses must be non-negative");
+            }
+            if (losses > 0.0) {
+                taxCalc->setCarryforwardLoss(losses);
+                std::cout << "  Imported carryforward losses: ₽" << losses << std::endl;
+            }
+        }
+
+        std::cout << "✓ Tax calculator configured" << std::endl << std::endl;
+    }
+
+    // ========================================================================
+    // 7. Загружаем плагин стратегии
+    // ========================================================================
+
     std::cout << "Loading strategy plugin: " << strategyName << "..." << std::endl;
 
     std::string pluginName = strategyName;
-    std::transform(pluginName.begin(), pluginName.end(), pluginName.begin(), ::tolower);
+    std::transform(pluginName.begin(), pluginName.end(),
+                   pluginName.begin(), ::tolower);
     pluginName += "_strategy";
 
-    // Получаем путь к плагинам из переменной окружения или используем дефолтный
     const char* envPluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
     std::string pluginBasePath = envPluginPath ? envPluginPath : "./plugins";
     std::string pluginPath = pluginBasePath + "/strategy/" + pluginName + ".so";
 
     std::cout << "  Plugin path: " << pluginPath << std::endl;
 
-    // Очищаем предыдущие ошибки dlopen
     dlerror();
-
     void* handle = dlopen(pluginPath.c_str(), RTLD_LAZY);
     if (!handle) {
         const char* error = dlerror();
@@ -854,25 +933,26 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
                                std::string(error ? error : "unknown error"));
     }
 
-    // Получаем функции плагина через C API
     using CreateStrategyFunc = portfolio::IPortfolioStrategy* (*)(const char*);
     using DestroyStrategyFunc = void (*)(portfolio::IPortfolioStrategy*);
 
-    // Очищаем ошибки перед dlsym
     dlerror();
-
-    auto createStrategy = reinterpret_cast<CreateStrategyFunc>(dlsym(handle, "createStrategy"));
+    auto createStrategy = reinterpret_cast<CreateStrategyFunc>(
+        dlsym(handle, "createStrategy"));
     const char* createError = dlerror();
     if (createError) {
         dlclose(handle);
-        return std::unexpected("Failed to find createStrategy symbol: " + std::string(createError));
+        return std::unexpected("Failed to find createStrategy symbol: " +
+                               std::string(createError));
     }
 
-    auto destroyStrategy = reinterpret_cast<DestroyStrategyFunc>(dlsym(handle, "destroyStrategy"));
+    auto destroyStrategy = reinterpret_cast<DestroyStrategyFunc>(
+        dlsym(handle, "destroyStrategy"));
     const char* destroyError = dlerror();
     if (destroyError) {
         dlclose(handle);
-        return std::unexpected("Failed to find destroyStrategy symbol: " + std::string(destroyError));
+        return std::unexpected("Failed to find destroyStrategy symbol: " +
+                               std::string(destroyError));
     }
 
     if (!createStrategy || !destroyStrategy) {
@@ -880,7 +960,6 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
         return std::unexpected("Failed to find required plugin symbols");
     }
 
-    // Создаем экземпляр стратегии
     portfolio::IPortfolioStrategy* strategy = createStrategy("");
     if (!strategy) {
         dlclose(handle);
@@ -891,29 +970,65 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
               << " v" << strategy->getVersion() << std::endl;
     std::cout << "  Description: " << strategy->getDescription() << std::endl << std::endl;
 
-    // 7. Устанавливаем базу данных для стратегии
+    // ========================================================================
+    // 8. Устанавливаем базу данных и налоговый калькулятор
+    // ========================================================================
+
     strategy->setDatabase(database_);
 
-    // 8. Создаем параметры портфеля
+    if (taxCalc) {
+        strategy->setTaxCalculator(taxCalc);
+    }
+
+    // ========================================================================
+    // 9. Создаем параметры портфеля
+    // ========================================================================
+
     portfolio::IPortfolioStrategy::PortfolioParams params;
     params.instrumentIds = portfolioInfo.instruments;
     params.weights = portfolioInfo.weights;
     params.initialCapital = initialCapital;
+    params.reinvestDividends = true;
 
-    // 9. Выполняем бэктест
+    // ========================================================================
+    // 10. Выполняем бэктест
+    // ========================================================================
+
     std::cout << "Running backtest..." << std::endl;
-    std::cout << "  Period: " << fromDateStrResult.value() << " to " << toDateStrResult.value() << std::endl;
+    std::cout << "  Period: " << fromDateStrResult.value()
+              << " to " << toDateStrResult.value() << std::endl;
     std::cout << "  Initial Capital: $" << initialCapital << std::endl;
     std::cout << std::string(70, '-') << std::endl << std::endl;
 
     auto backtestResult = strategy->backtest(params, fromDate, toDate, initialCapital);
 
-    // Очищаем ресурсы
+    // ========================================================================
+    // 11. Очищаем ресурсы
+    // ========================================================================
+
     destroyStrategy(strategy);
     dlclose(handle);
 
     if (!backtestResult) {
         return std::unexpected("Backtest failed: " + backtestResult.error());
+    }
+
+    // ========================================================================
+    // 12. Выводим результаты
+    // ========================================================================
+
+    const auto& result = backtestResult.value();
+    printBacktestResults(result);
+
+    if (taxCalc) {
+        printTaxResults(result);
+
+        // Экспортируем перенос убытков
+        double carryforward = taxCalc->getCarryforwardLoss();
+        if (carryforward > 0.0) {
+            std::cout << "NOTE: To use carryforward losses next year, run:" << std::endl;
+            std::cout << "  --import-losses " << carryforward << std::endl << std::endl;
+        }
     }
 
     return {};
@@ -1214,6 +1329,60 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
     std::cout << "Plugin info command not yet implemented." << std::endl;
     std::cout << "Use 'portfolio plugin list' to see available plugins." << std::endl;
     return {};
+}
+
+void CommandExecutor::printTaxResults(
+    const IPortfolioStrategy::BacktestResult& result) const
+{
+    if (result.totalTaxesPaid == 0.0) {
+        return;
+    }
+
+    const auto& tax = result.taxSummary;
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "НАЛОГИ (НДФЛ 13%)" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << std::fixed << std::setprecision(2);
+
+    std::cout << "\nПрирост капитала:" << std::endl;
+    std::cout << "  Прибыль:           ₽" << tax.totalGains << std::endl;
+    std::cout << "  Убытки:            ₽" << tax.totalLosses << std::endl;
+
+    if (tax.exemptGain > 0.0) {
+        std::cout << "  Льгота 3+ года:    ₽" << tax.exemptGain
+                  << " (" << tax.exemptTransactions << " сделок)" << std::endl;
+    }
+
+    if (tax.carryforwardUsed > 0.0) {
+        std::cout << "  Перенос прошлых убытков: ₽" << tax.carryforwardUsed << std::endl;
+    }
+
+    std::cout << "  Чистая прибыль:    ₽" << tax.netGain << std::endl;
+    std::cout << "  Налог:             ₽" << tax.capitalGainsTax << std::endl;
+
+    if (tax.carryforwardLoss > 0.0) {
+        std::cout << "\nПеренос убытков на следующий год: ₽"
+                  << tax.carryforwardLoss << std::endl;
+    }
+
+    if (tax.totalDividends > 0.0) {
+        std::cout << "\nДивиденды:" << std::endl;
+        std::cout << "  Получено:          ₽" << tax.totalDividends << std::endl;
+        std::cout << "  Налог:             ₽" << tax.dividendTax << std::endl;
+    }
+
+    std::cout << "\nИтого:" << std::endl;
+    std::cout << "  Всего налогов:     ₽" << result.totalTaxesPaid << std::endl;
+    std::cout << "  После налогов:     ₽" << result.afterTaxFinalValue << std::endl;
+    std::cout << "  Доходность:        " << result.afterTaxReturn << "%" << std::endl;
+    std::cout << "  Эффективность:     " << result.taxEfficiency << "%" << std::endl;
+
+    std::cout << "\nСтатистика:" << std::endl;
+    std::cout << "  Прибыльных:        " << tax.profitableTransactions << std::endl;
+    std::cout << "  Убыточных:         " << tax.losingTransactions << std::endl;
+
+    std::cout << std::string(70, '=') << "\n" << std::endl;
 }
 
 } // namespace portfolio

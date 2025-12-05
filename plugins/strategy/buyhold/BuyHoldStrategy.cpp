@@ -8,450 +8,311 @@
 
 namespace portfolio {
 
-std::expected<void, std::string> BuyHoldStrategy::initializeStrategyParameters(
-    const PortfolioParams& params)
-{
-    if (params.instrumentIds.empty()) {
-        return std::unexpected("Portfolio must contain at least one instrument");
-    }
-
-    currentParams_ = params;
-    entryPrices_.clear();
-    finalPrices_.clear();
-    dailyValues_.clear();
-    cashBalance_ = 0.0;
-    reinvestDividends_ = params.reinvestDividends;
-
-    // Очищаем историю дивидендов из базового класса
-    dividendPaymentHistory_.clear();
-
-    return {};
-}
-
-std::expected<void, std::string> BuyHoldStrategy::validateInput(
+std::expected<IPortfolioStrategy::BacktestResult, std::string>
+BuyHoldStrategy::backtest(
     const PortfolioParams& params,
     const TimePoint& startDate,
     const TimePoint& endDate,
     double initialCapital)
 {
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "BuyHold Strategy Backtest" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Period: " << std::chrono::duration_cast<std::chrono::hours>(
+                                   endDate - startDate).count() / 24 << " days" << std::endl;
+    std::cout << "Initial Capital: $" << initialCapital << std::endl;
+    std::cout << "Instruments: " << params.instrumentIds.size() << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    // Валидация
     if (initialCapital <= 0.0) {
         return std::unexpected("Initial capital must be positive");
     }
-
     if (endDate <= startDate) {
         return std::unexpected("End date must be after start date");
     }
-
     if (params.instrumentIds.empty()) {
         return std::unexpected("Portfolio must contain instruments");
     }
 
-    // Проверяем что сумма весов равна 1.0
-    if (!params.weights.empty()) {
-        double totalWeight = 0.0;
-        for (const auto& [id, weight] : params.weights) {
-            if (weight < 0.0 || weight > 1.0) {
-                return std::unexpected("Weights must be between 0 and 1");
-            }
-            totalWeight += weight;
-        }
-
-        if (std::abs(totalWeight - 1.0) > 0.001) {
-            return std::unexpected("Sum of weights must equal 1.0 (current sum: " +
-                                   std::to_string(totalWeight) + ")");
-        }
+    // Загрузка данных
+    auto priceResult = loadPriceData(params, startDate, endDate);
+    if (!priceResult) {
+        return std::unexpected(priceResult.error());
     }
 
-    return {};
-}
+    auto dividendResult = loadDividendData(params, startDate, endDate);
+    // Дивиденды опциональны, продолжаем если их нет
 
-std::expected<void, std::string> BuyHoldStrategy::loadRequiredData(
-    const PortfolioParams& params,
-    const TimePoint& startDate,
-    const TimePoint& endDate)
-{
-    if (!database_) {
-        return std::unexpected("Database not set. Call setDatabase() before backtest.");
-    }
+    // Инициализация портфеля
+    std::map<std::string, double> holdings;
+    double cashBalance = 0.0;
 
-    std::cout << "Loading price data for " << params.instrumentIds.size()
-              << " instruments..." << std::endl;
-
+    std::cout << "Initializing positions..." << std::endl;
     for (const auto& instrumentId : params.instrumentIds) {
-        // Загружаем цены закрытия из БД
-        auto priceHistory = database_->getAttributeHistory(
-            instrumentId,
-            "close",
-            startDate,
-            endDate,
-            ""  // Без фильтра по источнику
-            );
-
-        if (!priceHistory) {
-            return std::unexpected("Failed to load price data for " + instrumentId +
-                                   ": " + priceHistory.error());
+        if (priceData_[instrumentId].empty()) {
+            return std::unexpected("No price data for: " + instrumentId);
         }
 
-        if (priceHistory->empty()) {
-            return std::unexpected("No price data found for " + instrumentId +
-                                   " in the specified period");
-        }
-
-        // Конвертируем в нужный формат
-        std::vector<std::pair<TimePoint, double>> prices;
-        prices.reserve(priceHistory->size());
-
-        for (const auto& [timestamp, value] : *priceHistory) {
-            // Извлекаем double из AttributeValue
-            if (std::holds_alternative<double>(value)) {
-                prices.emplace_back(timestamp, std::get<double>(value));
-            } else if (std::holds_alternative<std::int64_t>(value)) {
-                prices.emplace_back(timestamp, static_cast<double>(std::get<std::int64_t>(value)));
-            } else {
-                return std::unexpected("Invalid price data type for " + instrumentId);
-            }
-        }
-
-        // Сортируем по дате
-        std::sort(prices.begin(), prices.end(),
-                  [](const auto& a, const auto& b) { return a.first < b.first; });
-
-        strategyData_[instrumentId] = std::move(prices);
-
-        std::cout << "  ✓ Loaded " << strategyData_[instrumentId].size()
-                  << " price points for " << instrumentId << std::endl;
-    }
-
-    return {};
-}
-
-std::expected<IPortfolioStrategy::BacktestResult, std::string>
-BuyHoldStrategy::initializePortfolio(
-    const PortfolioParams& params,
-    double initialCapital)
-{
-    IPortfolioStrategy::BacktestResult result;
-    result.finalValue = initialCapital;
-    cashBalance_ = 0.0;
-
-    std::cout << std::endl;
-    std::cout << "Initializing portfolio positions:" << std::endl;
-    std::cout << "Reinvest dividends: " << (reinvestDividends_ ? "Yes" : "No") << std::endl;
-
-    // Сохраняем количество акций для каждого инструмента
-    instrumentHoldings_.clear();
-
-    // Получаем начальную дату (из первого инструмента)
-    TimePoint startDate;
-    if (!strategyData_.empty()) {
-        startDate = strategyData_.begin()->second.front().first;
-    }
-
-    for (const auto& instrumentId : params.instrumentIds) {
-        if (strategyData_.find(instrumentId) == strategyData_.end()) {
-            return std::unexpected("No price data for instrument: " + instrumentId);
-        }
-
-        const auto& prices = strategyData_[instrumentId];
-        if (prices.empty()) {
-            return std::unexpected("Empty price data for instrument: " + instrumentId);
-        }
-
-        // Определяем вес инструмента
-        double weight = 1.0 / params.instrumentIds.size();  // Дефолт: равный вес
+        double weight = 1.0 / params.instrumentIds.size();
         if (params.weights.count(instrumentId)) {
             weight = params.weights.at(instrumentId);
         }
 
-        // Покупаем по первой цене
-        entryPrices_[instrumentId] = prices.front().second;
+        const auto& prices = priceData_[instrumentId];
+        double entryPrice = prices.front().second;
+        TimePoint entryDate = prices.front().first;
+
         double capitalForInstrument = initialCapital * weight;
+        double quantity = capitalForInstrument / entryPrice;
 
-        // НОВОЕ: Учитываем лотность
-        std::int64_t lotSize = getEffectiveLotSize(instrumentId, startDate);
-        std::int64_t numLots = calculateAffordableLots(
-            capitalForInstrument,
-            entryPrices_[instrumentId],
-            lotSize
-            );
+        holdings[instrumentId] = quantity;
 
-        // Количество акций = количество лотов × размер лота
-        double quantity = static_cast<double>(numLots * lotSize);
+        // Налоговый лот при покупке
+        addTaxLot(instrumentId, quantity, entryPrice, entryDate);
 
-        // Если не можем купить ни одного лота, пропускаем инструмент
-        if (quantity <= 0.0) {
-            std::cout << "  " << instrumentId << ":" << std::endl;
-            std::cout << "    Warning: Insufficient capital to buy even one lot" << std::endl;
-            std::cout << "    Lot size: " << lotSize << std::endl;
-            std::cout << "    Price per lot: " << (entryPrices_[instrumentId] * lotSize) << std::endl;
-            std::cout << "    Capital allocated: " << capitalForInstrument << std::endl;
-            continue;
-        }
-
-        instrumentHoldings_[instrumentId] = quantity;
-
-        // Добавляем неиспользованный капитал к cashBalance
-        double actualSpent = quantity * entryPrices_[instrumentId];
-        cashBalance_ += (capitalForInstrument - actualSpent);
-
-        std::cout << "  " << instrumentId << ":" << std::endl;
-        std::cout << "    Weight: " << (weight * 100) << "%" << std::endl;
-        std::cout << "    Entry price: " << entryPrices_[instrumentId] << std::endl;
-        std::cout << "    Lot size: " << lotSize << std::endl;
-        std::cout << "    Capital allocated: " << capitalForInstrument << std::endl;
-        std::cout << "    Lots purchased: " << numLots << std::endl;
-        std::cout << "    Shares purchased: " << quantity << std::endl;
-        std::cout << "    Actual spent: " << actualSpent << std::endl;
-        std::cout << "    Unspent capital: " << (capitalForInstrument - actualSpent) << std::endl;
+        std::cout << "  " << instrumentId << ": "
+                  << quantity << " @ $" << entryPrice
+                  << " (weight: " << (weight * 100) << "%)" << std::endl;
     }
-
-    std::cout << "\nTotal unspent capital (cash balance): " << cashBalance_ << std::endl;
     std::cout << std::endl;
-    return result;
-}
 
-std::expected<IPortfolioStrategy::BacktestResult, std::string>
-BuyHoldStrategy::executeStrategy(
-    const PortfolioParams& params,
-    double initialCapital,
-    IPortfolioStrategy::BacktestResult& result)
-{
-    std::cout << "Executing Buy & Hold strategy..." << std::endl;
-
-    // Находим максимальное количество торговых дней
+    // Основной цикл бэктеста
     std::size_t maxDays = 0;
-    for (const auto& [id, prices] : strategyData_) {
+    for (const auto& [id, prices] : priceData_) {
         maxDays = std::max(maxDays, prices.size());
     }
 
-    // Рассчитываем ежедневную стоимость портфеля
-    dailyValues_.clear();
-    dailyValues_.reserve(maxDays);
+    std::vector<double> dailyValues;
+    dailyValues.reserve(maxDays);
+
+    std::cout << "Running simulation over " << maxDays << " days..." << std::endl;
 
     for (std::size_t day = 0; day < maxDays; ++day) {
-        // Получаем текущую дату (берем из первого инструмента)
         TimePoint currentDate;
-        if (!strategyData_.empty()) {
-            const auto& firstInstrumentPrices = strategyData_.begin()->second;
-            std::size_t dateIndex = std::min(day, firstInstrumentPrices.size() - 1);
-            currentDate = firstInstrumentPrices[dateIndex].first;
+        if (!priceData_.empty()) {
+            const auto& firstPrices = priceData_.begin()->second;
+            std::size_t dateIdx = std::min(day, firstPrices.size() - 1);
+            currentDate = firstPrices[dateIdx].first;
         }
 
-        // Проверяем дивидендные выплаты на текущую дату
-        double dividendsToday = processDividendPayments(
-            instrumentHoldings_,
-            currentDate,
-            cashBalance_
-            );
+        // Проверяем дивиденды на текущую дату
+        for (const auto& instrumentId : params.instrumentIds) {
+            if (dividendData_.count(instrumentId) == 0) continue;
 
-        // Если реинвестируем дивиденды, покупаем дополнительные акции
-        if (reinvestDividends_ && dividendsToday > 0.0) {
-            // Распределяем дивиденды пропорционально весам
-            for (const auto& instrumentId : params.instrumentIds) {
-                // Пропускаем инструменты без позиций
-                if (instrumentHoldings_.find(instrumentId) == instrumentHoldings_.end() ||
-                    instrumentHoldings_[instrumentId] <= 0.0) {
-                    continue;
-                }
+            const auto& dividends = dividendData_[instrumentId];
+            for (const auto& [divDate, divAmount] : dividends) {
+                if (divDate == currentDate) {
+                    double quantity = holdings[instrumentId];
+                    double totalDividend = divAmount * quantity;
 
-                double weight = 1.0 / params.instrumentIds.size();
-                if (params.weights.count(instrumentId)) {
-                    weight = params.weights.at(instrumentId);
-                }
+                    // Обрабатываем дивиденд с налогом
+                    processDividendWithTax(totalDividend, cashBalance);
 
-                const auto& prices = strategyData_[instrumentId];
-                std::size_t priceIndex = std::min(day, prices.size() - 1);
-                double currentPrice = prices[priceIndex].second;
+                    // Реинвестируем если нужно
+                    if (params.reinvestDividends && totalDividend > 0.0) {
+                        const auto& prices = priceData_[instrumentId];
+                        std::size_t priceIdx = std::min(day, prices.size() - 1);
+                        double currentPrice = prices[priceIdx].second;
 
-                if (currentPrice > 0.0) {
-                    double cashForInstrument = dividendsToday * weight;
+                        if (currentPrice > 0.0) {
+                            double additionalShares = (totalDividend * 0.87) / currentPrice; // После налога
+                            holdings[instrumentId] += additionalShares;
 
-                    // НОВОЕ: Учитываем лотность при реинвестировании
-                    std::int64_t lotSize = getEffectiveLotSize(instrumentId, currentDate);
-                    std::int64_t numLots = calculateAffordableLots(
-                        cashForInstrument,
-                        currentPrice,
-                        lotSize
-                        );
+                            // Добавляем налоговый лот
+                            addTaxLot(instrumentId, additionalShares, currentPrice, currentDate);
 
-                    if (numLots > 0) {
-                        double additionalShares = static_cast<double>(numLots * lotSize);
-                        instrumentHoldings_[instrumentId] += additionalShares;
-
-                        // Вычитаем реально потраченную сумму
-                        double actualSpent = additionalShares * currentPrice;
-                        cashBalance_ -= actualSpent;
+                            cashBalance = 0.0; // Потратили на покупку
+                        }
                     }
                 }
             }
         }
 
-        // Расчет стоимости портфеля
-        double portfolioValue = cashBalance_;  // Начинаем с денежного остатка
-
-        for (const auto& instrumentId : params.instrumentIds) {
-            if (instrumentHoldings_.find(instrumentId) == instrumentHoldings_.end()) {
-                continue;
-            }
-
-            const auto& prices = strategyData_[instrumentId];
-            std::size_t priceIndex = std::min(day, prices.size() - 1);
-            double currentPrice = prices[priceIndex].second;
-
-            double quantity = instrumentHoldings_[instrumentId];
-            portfolioValue += quantity * currentPrice;
-        }
-
-        dailyValues_.push_back(portfolioValue);
+        // Рассчитываем стоимость портфеля
+        double portfolioValue = cashBalance + calculatePortfolioValue(holdings, day);
+        dailyValues.push_back(portfolioValue);
     }
 
-    // Финальная стоимость портфеля
-    result.finalValue = dailyValues_.back();
+    // Финализация налогов
+    BacktestResult result;
+    result.finalValue = dailyValues.back();
 
-    // Сохраняем финальные цены
-    for (const auto& instrumentId : params.instrumentIds) {
-        if (strategyData_.find(instrumentId) != strategyData_.end()) {
-            const auto& prices = strategyData_[instrumentId];
-            finalPrices_[instrumentId] = prices.back().second;
-        }
+    finalizeTaxes(result, initialCapital);
+
+    // Расчет метрик
+    auto duration = std::chrono::duration_cast<std::chrono::hours>(endDate - startDate);
+    result.tradingDays = duration.count() / 24;
+
+    double initialValue = dailyValues.front();
+    result.totalReturn = ((result.finalValue - initialValue) / initialValue) * 100.0;
+
+    double yearsElapsed = result.tradingDays / 365.25;
+    if (yearsElapsed > 0) {
+        result.annualizedReturn = (std::pow(result.finalValue / initialValue,
+                                            1.0 / yearsElapsed) - 1.0) * 100.0;
     }
 
-    std::cout << "  ✓ Strategy executed over " << dailyValues_.size()
-              << " trading days" << std::endl;
-    std::cout << "  Initial value: " << initialCapital << std::endl;
-    std::cout << "  Final value: " << result.finalValue << std::endl;
-    std::cout << "  Final cash balance: " << cashBalance_ << std::endl;
+    // Волатильность
+    if (dailyValues.size() > 1) {
+        std::vector<double> dailyReturns;
+        for (std::size_t i = 1; i < dailyValues.size(); ++i) {
+            dailyReturns.push_back((dailyValues[i] - dailyValues[i-1]) / dailyValues[i-1]);
+        }
 
-    // Расчет дивидендных метрик
-    calculateDividendMetrics(result, initialCapital, static_cast<std::int64_t>(dailyValues_.size()));
+        double meanReturn = std::accumulate(dailyReturns.begin(), dailyReturns.end(), 0.0)
+                            / dailyReturns.size();
+        double variance = 0.0;
+        for (double ret : dailyReturns) {
+            variance += (ret - meanReturn) * (ret - meanReturn);
+        }
+        variance /= dailyReturns.size();
+        result.volatility = std::sqrt(variance) * std::sqrt(252.0) * 100.0;
+    }
 
-    if (result.totalDividends > 0.0) {
-        std::cout << "  Total dividends received: " << result.totalDividends << std::endl;
-        std::cout << "  Dividend payments: " << result.dividendPayments << std::endl;
+    // Maximum Drawdown
+    double maxValue = dailyValues[0];
+    double maxDrawdown = 0.0;
+    for (double value : dailyValues) {
+        if (value > maxValue) maxValue = value;
+        double drawdown = (maxValue - value) / maxValue;
+        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    }
+    result.maxDrawdown = maxDrawdown * 100.0;
+
+    // Sharpe Ratio
+    if (result.volatility > 0) {
+        result.sharpeRatio = (result.annualizedReturn - 2.0) / result.volatility;
+    }
+
+    std::cout << "\n✓ Backtest completed" << std::endl;
+    std::cout << "  Final Value: $" << result.finalValue << std::endl;
+    std::cout << "  Total Return: " << result.totalReturn << "%" << std::endl;
+
+    if (taxCalculator_) {
+        std::cout << "  After-Tax Return: " << result.afterTaxReturn << "%" << std::endl;
+        std::cout << "  Taxes Paid: $" << result.totalTaxesPaid << std::endl;
     }
     std::cout << std::endl;
 
     return result;
 }
 
-std::expected<void, std::string> BuyHoldStrategy::calculateMetrics(
-    IPortfolioStrategy::BacktestResult& result,
+std::expected<void, std::string> BuyHoldStrategy::loadPriceData(
+    const PortfolioParams& params,
     const TimePoint& startDate,
     const TimePoint& endDate)
 {
-    std::cout << "Calculating performance metrics..." << std::endl;
-
-    // 1. Trading Days
-    auto duration = std::chrono::duration_cast<std::chrono::hours>(endDate - startDate);
-    result.tradingDays = duration.count() / 24;
-
-    // 2. Total Return (включая дивиденды)
-    double initialValue = dailyValues_.front();
-    result.totalReturn = ((result.finalValue - initialValue) / initialValue) * 100.0;
-
-    // 3. Price Return (без дивидендов)
-    double finalValueWithoutDividends = result.finalValue - result.totalDividends;
-    if (!reinvestDividends_) {
-        finalValueWithoutDividends = result.finalValue - cashBalance_;
-    }
-    result.priceReturn = ((finalValueWithoutDividends - initialValue) / initialValue) * 100.0;
-
-    // 4. Annualized Return
-    double yearsElapsed = result.tradingDays / 365.25;
-    if (yearsElapsed > 0) {
-        result.annualizedReturn = (std::pow(result.finalValue / initialValue,
-                                            1.0 / yearsElapsed) - 1.0) * 100.0;
-    } else {
-        result.annualizedReturn = 0.0;
+    if (!database_) {
+        return std::unexpected("Database not set");
     }
 
-    // 5. Volatility
-    if (dailyValues_.size() > 1) {
-        std::vector<double> dailyReturns;
-        dailyReturns.reserve(dailyValues_.size() - 1);
+    std::cout << "Loading price data..." << std::endl;
+    priceData_.clear();
 
-        for (std::size_t i = 1; i < dailyValues_.size(); ++i) {
-            double dailyReturn = (dailyValues_[i] - dailyValues_[i-1]) / dailyValues_[i-1];
-            dailyReturns.push_back(dailyReturn);
+    for (const auto& instrumentId : params.instrumentIds) {
+        auto priceHistory = database_->getAttributeHistory(
+            instrumentId, "close", startDate, endDate, "");
+
+        if (!priceHistory) {
+            return std::unexpected("Failed to load prices for " + instrumentId +
+                                   ": " + priceHistory.error());
         }
 
-        double meanReturn = std::accumulate(dailyReturns.begin(), dailyReturns.end(), 0.0)
-                            / dailyReturns.size();
-
-        double variance = 0.0;
-        for (double ret : dailyReturns) {
-            variance += (ret - meanReturn) * (ret - meanReturn);
-        }
-        variance /= dailyReturns.size();
-
-        double dailyVolatility = std::sqrt(variance);
-        result.volatility = dailyVolatility * std::sqrt(252.0) * 100.0;
-    } else {
-        result.volatility = 0.0;
-    }
-
-    // 6. Maximum Drawdown
-    double maxValue = dailyValues_[0];
-    double maxDrawdown = 0.0;
-
-    for (double value : dailyValues_) {
-        if (value > maxValue) {
-            maxValue = value;
+        if (priceHistory->empty()) {
+            return std::unexpected("No price data for " + instrumentId);
         }
 
-        double drawdown = (maxValue - value) / maxValue;
-        if (drawdown > maxDrawdown) {
-            maxDrawdown = drawdown;
-        }
-    }
-
-    result.maxDrawdown = maxDrawdown * 100.0;
-
-    // 7. Sharpe Ratio
-    double riskFreeRate = 2.0;
-    if (result.volatility > 0) {
-        result.sharpeRatio = (result.annualizedReturn - riskFreeRate) / result.volatility;
-    } else {
-        result.sharpeRatio = 0.0;
-    }
-
-    std::cout << "  ✓ Metrics calculated" << std::endl;
-    std::cout << std::endl;
-
-    // Вывод детальной информации
-    std::cout << "Position details:" << std::endl;
-    for (const auto& instrumentId : currentParams_.instrumentIds) {
-        if (entryPrices_.find(instrumentId) == entryPrices_.end() ||
-            finalPrices_.find(instrumentId) == finalPrices_.end()) {
-            continue;
+        std::vector<std::pair<TimePoint, double>> prices;
+        for (const auto& [timestamp, value] : *priceHistory) {
+            if (std::holds_alternative<double>(value)) {
+                prices.emplace_back(timestamp, std::get<double>(value));
+            } else if (std::holds_alternative<std::int64_t>(value)) {
+                prices.emplace_back(timestamp, static_cast<double>(std::get<std::int64_t>(value)));
+            }
         }
 
-        double entryPrice = entryPrices_[instrumentId];
-        double finalPrice = finalPrices_[instrumentId];
-        double priceReturn = ((finalPrice - entryPrice) / entryPrice) * 100.0;
-        double finalShares = instrumentHoldings_.count(instrumentId) ?
-                                 instrumentHoldings_[instrumentId] : 0.0;
+        std::sort(prices.begin(), prices.end());
+        priceData_[instrumentId] = std::move(prices);
 
-        std::cout << "  " << instrumentId << ":" << std::endl;
-        std::cout << "    Entry price: " << entryPrice << std::endl;
-        std::cout << "    Final price: " << finalPrice << std::endl;
-        std::cout << "    Price return: " << priceReturn << "%" << std::endl;
-        std::cout << "    Final shares: " << finalShares << std::endl;
-    }
-    std::cout << std::endl;
-
-    // Дивидендная информация
-    if (result.totalDividends > 0.0) {
-        std::cout << "Dividend details:" << std::endl;
-        std::cout << "  Total dividends: $" << result.totalDividends << std::endl;
-        std::cout << "  Dividend return: " << result.dividendReturn << "%" << std::endl;
-        std::cout << "  Dividend yield (annual): " << result.dividendYield << "%" << std::endl;
-        std::cout << "  Number of payments: " << result.dividendPayments << std::endl;
-        std::cout << "  Reinvested: " << (reinvestDividends_ ? "Yes" : "No") << std::endl;
-        std::cout << std::endl;
+        std::cout << "  ✓ " << instrumentId << ": "
+                  << priceData_[instrumentId].size() << " points" << std::endl;
     }
 
     return {};
+}
+
+std::expected<void, std::string> BuyHoldStrategy::loadDividendData(
+    const PortfolioParams& params,
+    const TimePoint& startDate,
+    const TimePoint& endDate)
+{
+    if (!database_) {
+        return {};
+    }
+
+    std::cout << "Loading dividend data..." << std::endl;
+    dividendData_.clear();
+
+    std::size_t totalDividends = 0;
+    for (const auto& instrumentId : params.instrumentIds) {
+        auto dividendHistory = database_->getAttributeHistory(
+            instrumentId, "dividend", startDate, endDate, "");
+
+        if (!dividendHistory || dividendHistory->empty()) {
+            continue;
+        }
+
+        std::vector<std::pair<TimePoint, double>> dividends;
+        for (const auto& [timestamp, value] : *dividendHistory) {
+            double amount = 0.0;
+            if (std::holds_alternative<double>(value)) {
+                amount = std::get<double>(value);
+            } else if (std::holds_alternative<std::int64_t>(value)) {
+                amount = static_cast<double>(std::get<std::int64_t>(value));
+            }
+
+            if (amount > 0.0) {
+                dividends.emplace_back(timestamp, amount);
+            }
+        }
+
+        if (!dividends.empty()) {
+            std::sort(dividends.begin(), dividends.end());
+            dividendData_[instrumentId] = std::move(dividends);
+            totalDividends += dividendData_[instrumentId].size();
+
+            std::cout << "  ✓ " << instrumentId << ": "
+                      << dividendData_[instrumentId].size() << " payments" << std::endl;
+        }
+    }
+
+    if (totalDividends > 0) {
+        std::cout << "Total dividend payments: " << totalDividends << std::endl;
+    } else {
+        std::cout << "No dividend data found" << std::endl;
+    }
+
+    return {};
+}
+
+double BuyHoldStrategy::calculatePortfolioValue(
+    const std::map<std::string, double>& holdings,
+    std::size_t dayIndex) const
+{
+    double total = 0.0;
+
+    for (const auto& [instrumentId, quantity] : holdings) {
+        if (priceData_.count(instrumentId) == 0) continue;
+
+        const auto& prices = priceData_.at(instrumentId);
+        std::size_t priceIdx = std::min(dayIndex, prices.size() - 1);
+        double currentPrice = prices[priceIdx].second;
+
+        total += quantity * currentPrice;
+    }
+
+    return total;
 }
 
 } // namespace portfolio

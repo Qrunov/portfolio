@@ -3,6 +3,7 @@
 
 #include "IPortfolioStrategy.hpp"
 #include "IPortfolioDatabase.hpp"
+#include "TaxCalculator.hpp"
 #include <map>
 #include <vector>
 #include <memory>
@@ -10,24 +11,20 @@
 namespace portfolio {
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Base Portfolio Strategy - Template Method Pattern
+// Base Portfolio Strategy (упрощенная версия)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class BasePortfolioStrategy : public IPortfolioStrategy {
 public:
     ~BasePortfolioStrategy() override = default;
 
-    // Реализация setDatabase из интерфейса
     void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override {
         database_ = db;
     }
 
-    // Template Method - основной алгоритм бэктестирования
-    std::expected<BacktestResult, std::string> backtest(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) final;
+    void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override {
+        taxCalculator_ = taxCalc;
+    }
 
     // Disable copy
     BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
@@ -36,139 +33,123 @@ public:
 protected:
     BasePortfolioStrategy() = default;
 
-    // Доступ к БД для наследников
+    // Доступ к БД и калькулятору для наследников
     std::shared_ptr<IPortfolioDatabase> database_;
+    std::shared_ptr<TaxCalculator> taxCalculator_;
 
-    // ═════════════════════════════════════════════════════════════════════════════
-    // Template Method Steps - Abstract Methods для переопределения в подклассах
-    // ═════════════════════════════════════════════════════════════════════════════
+    // Хранилище налоговых лотов
+    std::map<std::string, std::vector<TaxLot>> instrumentLots_;
 
-    // Шаг 1: Инициализация параметров стратегии
-    virtual std::expected<void, std::string> initializeStrategyParameters(
-        const PortfolioParams& params) = 0;
-
-    // Шаг 2: Валидация входных данных
-    virtual std::expected<void, std::string> validateInput(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) = 0;
-
-    // Шаг 3: Загрузка необходимых данных для всех инструментов
-    virtual std::expected<void, std::string> loadRequiredData(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate) = 0;
-
-    // Шаг 4: Инициализация портфеля
-    virtual std::expected<BacktestResult, std::string> initializePortfolio(
-        const PortfolioParams& params,
-        double initialCapital) = 0;
-
-    // Шаг 5: Реализация торговой логики (основной алгоритм)
-    virtual std::expected<BacktestResult, std::string> executeStrategy(
-        const PortfolioParams& params,
-        double initialCapital,
-        BacktestResult& result) = 0;
-
-    // Шаг 6: Расчет финальных метрик (опционально)
-    virtual std::expected<void, std::string> calculateMetrics(
-        BacktestResult& result,
-        const TimePoint& startDate,
-        const TimePoint& endDate) = 0;
-
-    // ═════════════════════════════════════════════════════════════════════════════
-    // Protected Helper Methods - Дивиденды
-    // ═════════════════════════════════════════════════════════════════════════════
-
-    // Структура для хранения дивидендной информации
-    struct DividendPayment {
-        TimePoint exDividendDate;  // Дата дивидендной отсечки
-        double amount;             // Размер дивиденда на акцию
-        std::string instrumentId;  // Идентификатор инструмента
-    };
-
-    // Загрузка дивидендов для инструмента
-    std::expected<std::vector<DividendPayment>, std::string> loadDividends(
-        std::string_view instrumentId,
-        const TimePoint& startDate,
-        const TimePoint& endDate);
-
-    // Загрузка дивидендов для всех инструментов портфеля
-    std::expected<void, std::string> loadAllDividends(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate);
-
-    // Расчет дивидендных выплат для портфеля
-    double processDividendPayments(
-        const std::map<std::string, double>& instrumentHoldings,
-        const TimePoint& currentDate,
-        double& cashBalance);
-
-    // Получить все дивидендные выплаты в хронологическом порядке
-    std::vector<DividendPayment> getAllDividendsSorted() const;
-
-    // Расчет дивидендных метрик
-    void calculateDividendMetrics(
-        BacktestResult& result,
-        double initialCapital,
-        std::int64_t tradingDays) const;
-
-    // ═════════════════════════════════════════════════════════════════════════════
-    // Protected Helper Methods - Лотность
-    // ═════════════════════════════════════════════════════════════════════════════
-
-    // Структура для хранения информации о лотности
-    struct LotSizeInfo {
-        TimePoint effectiveDate;  // Дата начала действия
-        std::int64_t lotSize;     // Размер лота
-        std::string instrumentId; // Идентификатор инструмента
-    };
-
-    // Загрузка истории лотности для инструмента
-    std::expected<std::vector<LotSizeInfo>, std::string> loadLotSizes(
-        std::string_view instrumentId,
-        const TimePoint& startDate,
-        const TimePoint& endDate);
-
-    // Загрузка лотности для всех инструментов портфеля
-    std::expected<void, std::string> loadAllLotSizes(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate);
-
-    // Получить действующий размер лота на определенную дату
-    std::int64_t getEffectiveLotSize(
-        std::string_view instrumentId,
-        const TimePoint& date) const;
-
-    // Округлить количество акций до целого количества лотов
-    double roundToLots(
-        double quantity,
-        std::int64_t lotSize) const;
-
-    // Рассчитать максимальное количество лотов, которое можно купить
-    std::int64_t calculateAffordableLots(
-        double availableCapital,
-        double pricePerShare,
-        std::int64_t lotSize) const;
-
-    // ═════════════════════════════════════════════════════════════════════════════
-    // Protected Data Members
-    // ═════════════════════════════════════════════════════════════════════════════
-
-    // Для хранения данных стратегии между шагами
+    // Хранилище данных стратегии
     std::map<std::string, std::vector<std::pair<TimePoint, double>>> strategyData_;
 
-    // Дивиденды по инструментам
-    std::map<std::string, std::vector<DividendPayment>> dividendData_;
+    // ═════════════════════════════════════════════════════════════════════════
+    // Работа с налоговыми лотами
+    // ═════════════════════════════════════════════════════════════════════════
 
-    // Отслеживание выплаченных дивидендов
-    std::vector<std::pair<TimePoint, double>> dividendPaymentHistory_;
+    // Добавление лота при покупке
+    void addTaxLot(std::string_view instrumentId,
+                   double quantity,
+                   double price,
+                   const TimePoint& date)
+    {
+        if (!taxCalculator_) {
+            return;
+        }
 
-    // Лотность по инструментам (отсортировано по дате)
-    std::map<std::string, std::vector<LotSizeInfo>> lotSizeData_;
+        TaxLot lot;
+        lot.instrumentId = std::string(instrumentId);
+        lot.quantity = quantity;
+        lot.costBasis = price;
+        lot.purchaseDate = date;
+
+        instrumentLots_[std::string(instrumentId)].push_back(lot);
+    }
+
+    // Обработка продажи с учетом налогов
+    std::expected<double, std::string> processSaleWithTax(
+        std::string_view instrumentId,
+        double quantity,
+        double price,
+        const TimePoint& date,
+        double& cashBalance)
+    {
+        double saleAmount = quantity * price;
+
+        if (!taxCalculator_) {
+            cashBalance += saleAmount;
+            return saleAmount;
+        }
+
+        std::string id(instrumentId);
+        auto& lots = instrumentLots_[id];
+
+        if (lots.empty()) {
+            return std::unexpected("No lots available for sale");
+        }
+
+        // Регистрируем продажу в налоговом калькуляторе
+        auto result = taxCalculator_->recordSale(instrumentId, quantity, price, date, lots);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+
+        // Удаляем проданные лоты
+        double remaining = quantity;
+        for (auto it = lots.begin(); it != lots.end() && remaining > 0.0;) {
+            if (it->quantity <= remaining) {
+                remaining -= it->quantity;
+                it = lots.erase(it);
+            } else {
+                it->quantity -= remaining;
+                remaining = 0.0;
+                ++it;
+            }
+        }
+
+        cashBalance += saleAmount;
+        return saleAmount;
+    }
+
+    // Обработка дивидендов с налогом
+    double processDividendWithTax(
+        double amount,
+        double& cashBalance)
+    {
+        if (!taxCalculator_) {
+            cashBalance += amount;
+            return amount;
+        }
+
+        taxCalculator_->recordDividend(amount);
+
+        // Вычитаем налог сразу
+        double tax = amount * 0.13;
+        double afterTax = amount - tax;
+        cashBalance += afterTax;
+
+        return afterTax;
+    }
+
+    // Финализация налогов
+    void finalizeTaxes(BacktestResult& result, double initialCapital) const
+    {
+        if (!taxCalculator_) {
+            return;
+        }
+
+        auto summary = const_cast<TaxCalculator*>(taxCalculator_.get())->finalize();
+
+        result.taxSummary = summary;
+        result.totalTaxesPaid = summary.totalTax;
+        result.afterTaxFinalValue = result.finalValue - summary.totalTax;
+        result.afterTaxReturn =
+            ((result.afterTaxFinalValue - initialCapital) / initialCapital) * 100.0;
+
+        if (result.totalReturn > 0.0) {
+            result.taxEfficiency = (result.afterTaxReturn / result.totalReturn) * 100.0;
+        }
+    }
 };
 
 } // namespace portfolio

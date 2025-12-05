@@ -1,8 +1,10 @@
+// src/CommandLineParser.cpp
 #include "CommandLineParser.hpp"
 #include <iostream>
 #include <sstream>
 
 namespace portfolio {
+
 std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, char* argv[]) {
     if (argc < 2) {
         return std::unexpected("No command specified. Use 'portfolio help' for usage information.");
@@ -12,9 +14,7 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
     result.command = argv[1];
 
     try {
-        // ====================================================================
-        // Check for global help flag FIRST (before any processing)
-        // ====================================================================
+        // Проверка глобального help
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "help" || arg == "--help" || arg == "-h") {
@@ -34,27 +34,20 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
             }
         }
 
-        // ====================================================================
-        // Determine if there's a subcommand
-        // ====================================================================
+        // Определяем есть ли subcommand
         int startIdx = 2;
-
-        // Commands that have subcommands
         bool hasSubcommands = (result.command == "instrument" ||
                                result.command == "portfolio" ||
                                result.command == "strategy" ||
                                result.command == "source" ||
-                               result.command == "plugin");  // Добавили plugin
+                               result.command == "plugin");
 
         if (hasSubcommands && argc > 2 && argv[2][0] != '-') {
             result.subcommand = argv[2];
             startIdx = 3;
         }
 
-        // ====================================================================
-        // Parse options based on command
-        // ====================================================================
-
+        // Парсим опции
         if (result.command == "load") {
             auto desc = createLoadOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
@@ -85,7 +78,7 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(int argc, cha
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
             po::notify(result.options);
 
-        } else if (result.command == "plugin") {  // Новая команда
+        } else if (result.command == "plugin") {
             auto desc = createPluginOptions();
             std::vector<std::string> args(argv + startIdx, argv + argc);
             po::store(po::command_line_parser(args).options(desc).run(), result.options);
@@ -115,16 +108,15 @@ po::options_description CommandLineParser::createLoadOptions() {
         ("instrument-id,t", po::value<std::string>()->required(), "Instrument ID")
         ("name,n", po::value<std::string>()->required(), "Instrument name")
         ("source,s", po::value<std::string>()->required(), "Data source name")
-        ("type,T", po::value<std::string>()->default_value("stock"), "Instrument type (stock, index, inflation, cbrate, bond)")
+        ("type,T", po::value<std::string>()->default_value("stock"), "Instrument type")
         ("delimiter,d", po::value<char>()->default_value(','), "CSV delimiter")
-        ("map,m", po::value<std::vector<std::string>>()->multitoken(), "Attribute mapping (attr:col), columns indexed from 1")
-        ("date-column", po::value<size_t>()->default_value(1), "Date column index (indexed from 1, default: 1)")
+        ("map,m", po::value<std::vector<std::string>>()->multitoken(), "Attribute mapping")
+        ("date-column", po::value<size_t>()->default_value(1), "Date column index")
         ("date-format", po::value<std::string>()->default_value("%Y-%m-%d"), "Date format")
-        ("skip-header", po::value<bool>()->default_value(true), "Skip CSV header (default: true)")
-        ("db", po::value<std::string>()->default_value("InMemory"), "Database type (InMemory, SQLite)")
-        ("db-path", po::value<std::string>(), "Database file path (for SQLite)")
+        ("skip-header", po::value<bool>()->default_value(true), "Skip CSV header")
+        ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
+        ("db-path", po::value<std::string>(), "Database file path")
         ("help,h", "Show help message");
-
     return desc;
 }
 
@@ -156,18 +148,28 @@ po::options_description CommandLineParser::createPortfolioOptions() {
     return desc;
 }
 
+// ============================================================================
+// ЗАМЕНИТЬ ЭТОТ МЕТОД
+// ============================================================================
+
 po::options_description CommandLineParser::createStrategyOptions() {
     po::options_description desc("Strategy options");
     desc.add_options()
-        ("strategy,s", po::value<std::string>(), "Strategy name (e.g., BuyHold)")
+        ("strategy,s", po::value<std::string>(), "Strategy name")
         ("portfolio,p", po::value<std::string>(), "Portfolio name")
         ("from", po::value<std::string>(), "Start date (YYYY-MM-DD)")
         ("to", po::value<std::string>(), "End date (YYYY-MM-DD)")
-        ("initial-capital", po::value<double>(), "Initial capital (overrides portfolio default)")
-        ("output,o", po::value<std::string>(), "Output file path for results")
-        ("db", po::value<std::string>()->default_value("InMemory"), "Database type (InMemory, SQLite)")
-        ("db-path", po::value<std::string>(), "Database file path (for SQLite)")
-        ("param", po::value<std::string>(), "Parameter (name:value)")
+        ("initial-capital", po::value<double>(), "Initial capital")
+        ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
+        ("db-path", po::value<std::string>(), "Database path")
+
+        // Налоговые опции
+        ("enable-tax", po::bool_switch(), "Включить расчет НДФЛ")
+        ("ndfl-rate", po::value<double>(), "Ставка НДФЛ (по умолчанию 0.13)")
+        ("no-long-term-exemption", po::bool_switch(), "Отключить льготу 3+ года")
+        ("lot-method", po::value<std::string>(), "Метод выбора лотов (FIFO, LIFO, MinTax)")
+        ("import-losses", po::value<double>(), "Убытки с прошлого года (руб)")
+
         ("help,h", "Show help message");
     return desc;
 }
@@ -179,18 +181,19 @@ po::options_description CommandLineParser::createSourceOptions() {
     return desc;
 }
 
+po::options_description CommandLineParser::createPluginOptions() {
+    po::options_description desc("Plugin options");
+    desc.add_options()
+        ("type,t", po::value<std::string>(), "Filter by plugin type")
+        ("help,h", "Show help message");
+    return desc;
+}
+
 po::options_description CommandLineParser::createCommonOptions() {
     po::options_description desc("Common options");
     desc.add_options()
         ("help,h", "Show help message")
         ("verbose,v", po::bool_switch()->default_value(false), "Verbose output");
-    return desc;
-}
-po::options_description CommandLineParser::createPluginOptions() {
-    po::options_description desc("Plugin options");
-    desc.add_options()
-        ("type,t", po::value<std::string>(), "Filter by plugin type (database, strategy)")
-        ("help,h", "Show help message");
     return desc;
 }
 

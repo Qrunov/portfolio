@@ -51,3 +51,16 @@ portfolio_add_test(
 )
 
 message(STATUS "Core tests configured successfully")
+
+
+# ----------------------------------------------------------------------------
+# Trading Calendar Tests
+# ----------------------------------------------------------------------------
+
+portfolio_add_test(
+    NAME trading_calendar
+    SOURCES test_trading_calendar.cpp
+    LIBRARIES inmemory_db_impl
+)
+
+message(STATUS "  ✓ Added test: trading_calendar")

@@ -3,6 +3,7 @@
 
 #include "IPortfolioDatabase.hpp"
 #include "TaxCalculator.hpp"
+#include "TradingCalendar.hpp"  // ← ДОБАВИТЬ
 #include <string>
 #include <memory>
 #include <expected>
@@ -13,10 +14,6 @@
 namespace portfolio {
 
 using TimePoint = std::chrono::system_clock::time_point;
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Portfolio Strategy Interface
-// ═══════════════════════════════════════════════════════════════════════════════
 
 class IPortfolioStrategy {
 public:
@@ -49,6 +46,9 @@ public:
         double afterTaxFinalValue = 0.0;
         double taxEfficiency = 0.0;
         TaxSummary taxSummary;
+
+        // Корректировки дат
+        std::vector<DateAdjustment> dateAdjustments;  // ← ДОБАВИТЬ
     };
 
     struct PortfolioParams {
@@ -56,6 +56,9 @@ public:
         std::map<std::string, double> weights;
         double initialCapital = 0.0;
         bool reinvestDividends = true;
+
+        // Эталонный инструмент для торгового календаря
+        std::string referenceInstrument = "IMOEX";  // ← ДОБАВИТЬ
     };
 
     virtual std::expected<BacktestResult, std::string> backtest(

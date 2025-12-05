@@ -8,6 +8,7 @@ set(PORTFOLIO_CORE_SOURCES
     BasePortfolioStrategy.cpp
     PortfolioManager.cpp
     TaxCalculator.cpp
+    TradingCalendar.cpp
     #    InMemoryDatabase.cpp
 )
 

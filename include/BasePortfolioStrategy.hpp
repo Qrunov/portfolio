@@ -4,15 +4,12 @@
 #include "IPortfolioStrategy.hpp"
 #include "IPortfolioDatabase.hpp"
 #include "TaxCalculator.hpp"
+#include "TradingCalendar.hpp"  // ← ДОБАВИТЬ
 #include <map>
 #include <vector>
 #include <memory>
 
 namespace portfolio {
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Base Portfolio Strategy (упрощенная версия)
-// ═══════════════════════════════════════════════════════════════════════════════
 
 class BasePortfolioStrategy : public IPortfolioStrategy {
 public:
@@ -26,28 +23,94 @@ public:
         taxCalculator_ = taxCalc;
     }
 
-    // Disable copy
     BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
     BasePortfolioStrategy& operator=(const BasePortfolioStrategy&) = delete;
 
 protected:
     BasePortfolioStrategy() = default;
 
-    // Доступ к БД и калькулятору для наследников
     std::shared_ptr<IPortfolioDatabase> database_;
     std::shared_ptr<TaxCalculator> taxCalculator_;
+    std::unique_ptr<TradingCalendar> calendar_;  // ← ДОБАВИТЬ
 
     // Хранилище налоговых лотов
     std::map<std::string, std::vector<TaxLot>> instrumentLots_;
 
-    // Хранилище данных стратегии
-    std::map<std::string, std::vector<std::pair<TimePoint, double>>> strategyData_;
+    // ═════════════════════════════════════════════════════════════════════════
+    // Инициализация торгового календаря
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::expected<void, std::string> initializeTradingCalendar(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate)
+    {
+        if (!database_) {
+            return std::unexpected("Database not set");
+        }
+
+        auto calendarResult = TradingCalendar::create(
+            database_,
+            params.instrumentIds,
+            startDate,
+            endDate,
+            params.referenceInstrument);
+
+        if (!calendarResult) {
+            return std::unexpected(
+                "Failed to create trading calendar: " + calendarResult.error());
+        }
+
+        calendar_ = std::make_unique<TradingCalendar>(
+            std::move(*calendarResult));
+
+        return {};
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Корректировка дат операций
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::expected<TimePoint, std::string> adjustDateForBuy(
+        std::string_view instrumentId,
+        const TimePoint& requestedDate)
+    {
+        if (!calendar_) {
+            return requestedDate;  // Без календаря не корректируем
+        }
+
+        auto adjustmentResult = calendar_->adjustDateForOperation(
+            instrumentId, requestedDate, OperationType::Buy);
+
+        if (!adjustmentResult) {
+            return std::unexpected(adjustmentResult.error());
+        }
+
+        return adjustmentResult->adjustedDate;
+    }
+
+    std::expected<TimePoint, std::string> adjustDateForSell(
+        std::string_view instrumentId,
+        const TimePoint& requestedDate)
+    {
+        if (!calendar_) {
+            return requestedDate;  // Без календаря не корректируем
+        }
+
+        auto adjustmentResult = calendar_->adjustDateForOperation(
+            instrumentId, requestedDate, OperationType::Sell);
+
+        if (!adjustmentResult) {
+            return std::unexpected(adjustmentResult.error());
+        }
+
+        return adjustmentResult->adjustedDate;
+    }
 
     // ═════════════════════════════════════════════════════════════════════════
     // Работа с налоговыми лотами
     // ═════════════════════════════════════════════════════════════════════════
 
-    // Добавление лота при покупке
     void addTaxLot(std::string_view instrumentId,
                    double quantity,
                    double price,
@@ -66,7 +129,6 @@ protected:
         instrumentLots_[std::string(instrumentId)].push_back(lot);
     }
 
-    // Обработка продажи с учетом налогов
     std::expected<double, std::string> processSaleWithTax(
         std::string_view instrumentId,
         double quantity,
@@ -88,13 +150,13 @@ protected:
             return std::unexpected("No lots available for sale");
         }
 
-        // Регистрируем продажу в налоговом калькуляторе
-        auto result = taxCalculator_->recordSale(instrumentId, quantity, price, date, lots);
+        auto result = taxCalculator_->recordSale(
+            instrumentId, quantity, price, date, lots);
+
         if (!result) {
             return std::unexpected(result.error());
         }
 
-        // Удаляем проданные лоты
         double remaining = quantity;
         for (auto it = lots.begin(); it != lots.end() && remaining > 0.0;) {
             if (it->quantity <= remaining) {
@@ -111,7 +173,6 @@ protected:
         return saleAmount;
     }
 
-    // Обработка дивидендов с налогом
     double processDividendWithTax(
         double amount,
         double& cashBalance)
@@ -123,7 +184,6 @@ protected:
 
         taxCalculator_->recordDividend(amount);
 
-        // Вычитаем налог сразу
         double tax = amount * 0.13;
         double afterTax = amount - tax;
         cashBalance += afterTax;
@@ -131,7 +191,6 @@ protected:
         return afterTax;
     }
 
-    // Финализация налогов
     void finalizeTaxes(BacktestResult& result, double initialCapital) const
     {
         if (!taxCalculator_) {
@@ -148,6 +207,11 @@ protected:
 
         if (result.totalReturn > 0.0) {
             result.taxEfficiency = (result.afterTaxReturn / result.totalReturn) * 100.0;
+        }
+
+        // Добавляем лог корректировок дат
+        if (calendar_) {
+            result.dateAdjustments = calendar_->getAdjustmentLog();
         }
     }
 };

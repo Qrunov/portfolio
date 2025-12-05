@@ -70,7 +70,7 @@ protected:
 TEST_F(BuyHoldStrategyTest, StrategyMetadata) {
     EXPECT_EQ(strategy->getName(), "BuyHold");
     EXPECT_FALSE(strategy->getDescription().empty());
-    EXPECT_EQ(strategy->getVersion(), "1.0.1");
+    EXPECT_EQ(strategy->getVersion(), "1.0.2");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

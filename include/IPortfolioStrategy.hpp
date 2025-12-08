@@ -22,6 +22,7 @@ public:
     virtual std::string_view getName() const noexcept = 0;
     virtual std::string_view getVersion() const noexcept = 0;
     virtual std::string_view getDescription() const noexcept = 0;
+    virtual std::map<std::string, std::string> getDefaultParameters() const = 0;
 
     virtual void setDatabase(std::shared_ptr<IPortfolioDatabase> db) = 0;
     virtual void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) = 0;

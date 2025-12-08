@@ -23,6 +23,7 @@ private:
     std::shared_ptr<IPortfolioDatabase> database_;
     std::unique_ptr<IPortfolioManager> portfolioManager_;
     std::unique_ptr<PluginManager<IPortfolioDatabase>> pluginManager_;
+    std::unique_ptr<PluginManager<IPortfolioStrategy>> strategyPluginManager_;
 
     // Database initialization
     std::expected<void, std::string> ensureDatabase(
@@ -56,8 +57,8 @@ private:
     // Strategy Management
     std::expected<void, std::string> executeStrategy(const ParsedCommand& cmd);
     std::expected<void, std::string> executeStrategyList(const ParsedCommand& cmd);
-    std::expected<void, std::string> executeStrategyRequirements(const ParsedCommand& cmd);
     std::expected<void, std::string> executeStrategyExecute(const ParsedCommand& cmd);
+    std::expected<void, std::string> executeStrategyParams(const ParsedCommand& cmd);
 
     // Source Management
     std::expected<void, std::string> executeSource(const ParsedCommand& cmd);
@@ -114,7 +115,7 @@ private:
 
         return {};
     }
-
+    void printBacktestResult(const IPortfolioStrategy::BacktestResult& result) const;
 
 };
 

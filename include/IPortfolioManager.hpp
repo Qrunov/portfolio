@@ -23,6 +23,9 @@ struct PortfolioInfo {
     std::map<std::string, double> weights;
     std::string createdDate;
     std::string modifiedDate;
+
+    // ✅ ДОБАВЛЕНО: параметры стратегии
+    std::map<std::string, std::string> parameters;
 };
 
 class IPortfolioManager {

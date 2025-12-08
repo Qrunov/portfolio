@@ -28,6 +28,24 @@ public:
         const TimePoint& endDate,
         double initialCapital) override;
 
+
+    // ════════════════════════════════════════════════════════════════════
+    // Параметры: используем базовые + можем добавить свои
+    // ════════════════════════════════════════════════════════════════════
+
+    std::map<std::string, std::string> getDefaultParameters() const override {
+        // Получаем базовые параметры
+        auto defaults = BasePortfolioStrategy::getDefaultParameters();
+
+        // ✅ Можем добавить специфичные для BuyHold параметры
+        // defaults["rebalance_period"] = "0";  // 0 = никогда не ребалансировать
+        // defaults["min_position_size"] = "1000";  // минимальный размер позиции
+
+        return defaults;
+    }
+
+
+
 private:
     // Вспомогательные методы
     std::expected<void, std::string> loadPriceData(

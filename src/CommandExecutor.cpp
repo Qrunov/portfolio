@@ -23,6 +23,10 @@ CommandExecutor::CommandExecutor(std::shared_ptr<IPortfolioDatabase> db)
     const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
     std::string searchPath = pluginPath ? pluginPath : "./plugins";
     pluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
+
+
+    strategyPluginManager_ = std::make_unique<PluginManager<IPortfolioStrategy>>(searchPath);
+
 }
 
 CommandExecutor::~CommandExecutor() {
@@ -93,47 +97,99 @@ std::expected<TimePoint, std::string> CommandExecutor::parseDateString(
 }
 
 
-void CommandExecutor::printBacktestResults(
+void CommandExecutor::printBacktestResult(
     const IPortfolioStrategy::BacktestResult& result) const
 {
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "BACKTEST RESULTS" << std::endl;
-    std::cout << std::string(70, '=') << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
 
-    std::cout << std::fixed << std::setprecision(2);
+    // Основные метрики
+    std::cout << "Performance Metrics:" << std::endl;
+    std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
+    std::cout << "  Final Value:         $" << std::fixed << std::setprecision(2)
+              << result.finalValue << std::endl;
+    std::cout << "  Total Return:        " << std::setprecision(2)
+              << result.totalReturn << "%" << std::endl;
+    std::cout << "  Annualized Return:   " << std::setprecision(2)
+              << result.annualizedReturn << "%" << std::endl;
+    std::cout << std::endl;
 
-    std::cout << "\nPerformance:" << std::endl;
-    std::cout << "  Final Portfolio Value:  $" << result.finalValue << std::endl;
-    std::cout << "  Total Return:           " << result.totalReturn << "%" << std::endl;
+    // Risk метрики
+    std::cout << "Risk Metrics:" << std::endl;
+    std::cout << "  Volatility:          " << std::setprecision(2)
+              << result.volatility << "%" << std::endl;
+    std::cout << "  Max Drawdown:        " << std::setprecision(2)
+              << result.maxDrawdown << "%" << std::endl;
+    std::cout << "  Sharpe Ratio:        " << std::setprecision(2)
+              << result.sharpeRatio << std::endl;
+    std::cout << std::endl;
 
-    // Добавить информацию об инфляции
-    if (result.hasInflationData) {
-        std::cout << "  Inflation Rate:         " << result.inflationRate << "%" << std::endl;
-        std::cout << "  Real Return:            " << result.realReturn << "%" << std::endl;
+    // ✅ ИСПРАВЛЕНО: totalDividends вместо totalDividendsReceived
+    if (result.totalDividends > 0) {
+        std::cout << "Dividend Income:" << std::endl;
+        std::cout << "  Total Dividends:     $" << std::setprecision(2)
+                  << result.totalDividends << std::endl;
+        std::cout << "  Dividend Yield:      " << std::setprecision(2)
+                  << result.dividendYield << "%" << std::endl;
+        std::cout << std::endl;
     }
 
-    std::cout << "  Price Return:           " << result.priceReturn << "%" << std::endl;
-    std::cout << "  Dividend Return:        " << result.dividendReturn << "%" << std::endl;
-    std::cout << "  Annualized Return:      " << result.annualizedReturn << "%" << std::endl;
+    // Налоги
+    if (result.totalTaxesPaid > 0) {
+        std::cout << "Tax Information:" << std::endl;
+        std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
+                  << result.totalTaxesPaid << std::endl;
+        std::cout << "  After-Tax Value:     $" << std::setprecision(2)
+                  << result.afterTaxFinalValue << std::endl;
+        std::cout << "  After-Tax Return:    " << std::setprecision(2)
+                  << result.afterTaxReturn << "%" << std::endl;
+        std::cout << "  Tax Efficiency:      " << std::setprecision(2)
+                  << result.taxEfficiency << "%" << std::endl;
+        std::cout << std::endl;
 
-    if (result.hasInflationData) {
-        std::cout << "  Real Annualized Return: " << result.realAnnualizedReturn << "%" << std::endl;
+        // Детали налогов
+        const auto& tax = result.taxSummary;
+        std::cout << "  Tax Details:" << std::endl;
+
+        // ✅ ИСПРАВЛЕНО: taxableGain вместо totalTaxableGain
+        std::cout << "    Taxable Gain:      ₽" << std::setprecision(2)
+                  << tax.taxableGain << std::endl;
+        std::cout << "    Tax Paid:          ₽" << std::setprecision(2)
+                  << tax.totalTax << std::endl;
+
+        // ✅ ИСПРАВЛЕНО: используем totalDividends для дивидендного налога
+        if (result.totalDividends > 0) {
+            // Дивидендный налог = дивиденды * ставка (примерно)
+            double estimatedDivTax = result.totalDividends * 0.13; // оценка
+            std::cout << "    Estimated Div Tax: ₽" << std::setprecision(2)
+                      << estimatedDivTax << std::endl;
+        }
+
+        // ✅ УДАЛЕНО: поле longTermExemptionApplied отсутствует в TaxSummary
+        // Можно вывести информацию из других полей если нужно
+
+        if (tax.carryforwardLoss > 0) {
+            std::cout << "    Carryforward Loss: ₽" << std::setprecision(2)
+                      << tax.carryforwardLoss << std::endl;
+        }
+
+        std::cout << std::endl;
     }
 
-    std::cout << "\nDividend Information:" << std::endl;
-    std::cout << "  Total Dividends:        $" << result.totalDividends << std::endl;
-    std::cout << "  Dividend Yield (Annual): " << result.dividendYield << "%" << std::endl;
-    std::cout << "  Dividend Payments:      " << result.dividendPayments << std::endl;
+    // Инфляция
+    if (result.hasInflationData) {
+        std::cout << "Inflation Adjustment:" << std::endl;
+        std::cout << "  Cumulative Inflation: " << std::setprecision(2)
+                  << result.inflationRate << "%" << std::endl;
+        std::cout << "  Real Return:          " << std::setprecision(2)
+                  << result.realReturn << "%" << std::endl;
+        std::cout << "  Real Annual Return:   " << std::setprecision(2)
+                  << result.realAnnualizedReturn << "%" << std::endl;
+        std::cout << std::endl;
+    }
 
-    std::cout << "\nRisk Metrics:" << std::endl;
-    std::cout << "  Volatility (Annual):    " << result.volatility << "%" << std::endl;
-    std::cout << "  Maximum Drawdown:       " << result.maxDrawdown << "%" << std::endl;
-    std::cout << "  Sharpe Ratio:           " << result.sharpeRatio << std::endl;
-
-    std::cout << "\nTiming:" << std::endl;
-    std::cout << "  Trading Days:           " << result.tradingDays << std::endl;
-
-    std::cout << std::string(70, '=') << "\n" << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -301,227 +357,144 @@ std::expected<void, std::string> CommandExecutor::executeVersion(const ParsedCom
 
 void CommandExecutor::printHelp(std::string_view topic)
 {
-    std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "Portfolio Management System - Command Help" << std::endl;
-    std::cout << std::string(70, '=') << std::endl << std::endl;
-
     if (topic.empty()) {
-        // Общая справка
-        std::cout << "USAGE:" << std::endl;
-        std::cout << "  portfolio [COMMAND] [OPTIONS]" << std::endl << std::endl;
+        std::cout << "Portfolio Management System" << std::endl;
+        std::cout << "Usage: portfolio <command> [options]" << std::endl << std::endl;
 
-        std::cout << "GLOBAL COMMANDS:" << std::endl;
-        std::cout << "  help                    Show this help message" << std::endl;
-        std::cout << "  help [COMMAND]          Show help for specific command" << std::endl;
-        std::cout << "  version                 Show application version" << std::endl << std::endl;
+        std::cout << "COMMANDS:" << std::endl;
+        std::cout << "  portfolio               Manage portfolios" << std::endl;
+        std::cout << "  strategy                Execute trading strategies" << std::endl;
+        std::cout << "  source                  Manage data sources" << std::endl;
+        std::cout << "  plugin                  Manage plugins" << std::endl;
+        std::cout << "  help <command>          Show detailed help for a command" << std::endl;
+        std::cout << std::endl;
 
-        std::cout << "DATA LOADING:" << std::endl;
-        std::cout << "  load                    Load data from CSV file" << std::endl;
-        std::cout << "    -f, --file FILE       CSV file path" << std::endl;
-        std::cout << "    -t, --instrument-id ID Instrument identifier" << std::endl;
-        std::cout << "    -n, --name NAME       Instrument name" << std::endl;
-        std::cout << "    -s, --source SOURCE   Data source name" << std::endl;
-        std::cout << "    -T, --type TYPE       Instrument type (stock, index, etc.)" << std::endl;
-        std::cout << "    -m, --map MAPPING     Attribute mapping (attr:col)" << std::endl;
-        std::cout << "    --db TYPE             Database type (InMemory, SQLite)" << std::endl;
-        std::cout << "    --db-path PATH        Database file path (for SQLite)" << std::endl << std::endl;
-
-        std::cout << "INSTRUMENT COMMANDS:" << std::endl;
-        std::cout << "  instrument list         List all instruments" << std::endl;
-        std::cout << "  instrument show -t ID   Show instrument details" << std::endl;
-        std::cout << "  instrument delete -t ID Delete instrument" << std::endl << std::endl;
-
-        std::cout << "PORTFOLIO COMMANDS:" << std::endl;
-        std::cout << "  portfolio create -n NAME [--initial-capital AMOUNT]" << std::endl;
-        std::cout << "  portfolio list                                    " << std::endl;
-        std::cout << "  portfolio show -n NAME                            " << std::endl;
-        std::cout << "  portfolio delete -n NAME                          " << std::endl;
-        std::cout << "  portfolio add-instrument -p NAME -t ID [-w WEIGHT]" << std::endl;
-        std::cout << "  portfolio remove-instrument -p NAME -t ID         " << std::endl << std::endl;
-
-        std::cout << "STRATEGY COMMANDS:" << std::endl;
-        std::cout << "  strategy list           List available strategies" << std::endl;
-        std::cout << "  strategy execute -s STRATEGY" << std::endl << std::endl;
-
-        std::cout << "SOURCE COMMANDS:" << std::endl;
-        std::cout << "  source list             List all data sources" << std::endl << std::endl;
-
-        std::cout << "PLUGIN COMMANDS:" << std::endl;
-        std::cout << "  plugin list             List all available plugins" << std::endl;
-        std::cout << "  plugin list -t TYPE     List plugins of specific type" << std::endl;
-        std::cout << "                          Types: database, strategy" << std::endl << std::endl;
-
-        std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  # List all available plugins" << std::endl;
-        std::cout << "  portfolio plugin list" << std::endl << std::endl;
-
-        std::cout << "  # List only database plugins" << std::endl;
-        std::cout << "  portfolio plugin list -t database" << std::endl << std::endl;
-
-        std::cout << "  # Load data from CSV" << std::endl;
-        std::cout << "  portfolio load -f data.csv -t GAZP -n Gazprom -s MOEX \\" << std::endl;
-        std::cout << "    -m close:4 -m volume:5" << std::endl << std::endl;
-
-    } else if (topic == "plugin") {
-        // Детальная справка по plugin
-        std::cout << "COMMAND: plugin" << std::endl;
-        std::cout << "Manage and inspect available plugins" << std::endl << std::endl;
-
-        std::cout << "USAGE:" << std::endl;
-        std::cout << "  portfolio plugin list [OPTIONS]" << std::endl << std::endl;
-
-        std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  list                    List all available plugins" << std::endl << std::endl;
-
-        std::cout << "OPTIONS:" << std::endl;
-        std::cout << "  -t, --type TYPE         Filter by plugin type" << std::endl;
-        std::cout << "                          Available types: database, strategy" << std::endl << std::endl;
-
-        std::cout << "PLUGIN TYPES:" << std::endl;
-        std::cout << "  database                Database storage plugins" << std::endl;
-        std::cout << "                          Examples: InMemoryDatabase, SQLiteDatabase" << std::endl;
-        std::cout << "  strategy                Trading strategy plugins" << std::endl;
-        std::cout << "                          Examples: BuyHold, Momentum" << std::endl << std::endl;
-
-        std::cout << "PLUGIN PATH:" << std::endl;
-        std::cout << "  The system searches for plugins in the directory specified by" << std::endl;
-        std::cout << "  the PORTFOLIO_PLUGIN_PATH environment variable." << std::endl;
-        std::cout << "  Default: ./plugins" << std::endl << std::endl;
-
-        std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  # List all plugins" << std::endl;
-        std::cout << "  portfolio plugin list" << std::endl << std::endl;
-
-        std::cout << "  # List only database plugins" << std::endl;
-        std::cout << "  portfolio plugin list -t database" << std::endl << std::endl;
-
-        std::cout << "  # List only strategy plugins" << std::endl;
-        std::cout << "  portfolio plugin list -t strategy" << std::endl << std::endl;
-
-        std::cout << "  # Set custom plugin path" << std::endl;
-        std::cout << "  export PORTFOLIO_PLUGIN_PATH=/path/to/plugins" << std::endl;
-        std::cout << "  portfolio plugin list" << std::endl << std::endl;
-
-    } else if (topic == "instrument") {
-        std::cout << "COMMAND: instrument" << std::endl;
-        std::cout << "Manage financial instruments" << std::endl << std::endl;
-
-        std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  list                    List all instruments" << std::endl;
-        std::cout << "  show -t ID              Show instrument details" << std::endl;
-        std::cout << "  delete -t ID            Delete instrument" << std::endl << std::endl;
+        std::cout << "Examples:" << std::endl;
+        std::cout << "  portfolio help portfolio" << std::endl;
+        std::cout << "  portfolio help strategy" << std::endl;
+        std::cout << "  portfolio help source" << std::endl;
 
     } else if (topic == "portfolio") {
         std::cout << "COMMAND: portfolio" << std::endl;
         std::cout << "Manage investment portfolios" << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  create -n NAME          Create new portfolio" << std::endl;
+        std::cout << "  create                  Create a new portfolio" << std::endl;
         std::cout << "  list                    List all portfolios" << std::endl;
-        std::cout << "  show -n NAME            Show portfolio details" << std::endl;
-        std::cout << "  delete -n NAME          Delete portfolio" << std::endl;
+        std::cout << "  show -p NAME            Show portfolio details" << std::endl;
+        std::cout << "  delete -p NAME          Delete a portfolio" << std::endl;
         std::cout << "  add-instrument          Add instrument to portfolio" << std::endl;
-        std::cout << "  remove-instrument       Remove instrument from portfolio" << std::endl << std::endl;
-
-    } else if (topic == "strategy") {
-        std::cout << "COMMAND: strategy" << std::endl;
-        std::cout << "Execute trading strategies" << std::endl << std::endl;
-
-        std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  list                    List available strategies" << std::endl;
-        std::cout << "  execute -s STRATEGY     Execute strategy" << std::endl << std::endl;
-
-        std::cout << "REQUIRED OPTIONS:" << std::endl;
-        std::cout << "  -s, --strategy NAME          Strategy name" << std::endl;
-        std::cout << "  -p, --portfolio NAME         Portfolio name" << std::endl;
-        std::cout << "  --from DATE                  Start date (YYYY-MM-DD)" << std::endl;
-        std::cout << "  --to DATE                    End date (YYYY-MM-DD)" << std::endl;
+        std::cout << "  remove-instrument       Remove instrument from portfolio" << std::endl;
+        std::cout << "  set-param               Set strategy parameters for portfolio" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "STRATEGY PARAMETERS:" << std::endl;
-        std::cout << "  -P, --param KEY:VALUE        Set strategy parameter (repeatable)" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  Available parameters:" << std::endl;
-        std::cout << "    calendar:INSTRUMENT        Trading calendar reference (default: IMOEX)" << std::endl;
-        std::cout << "    inflation:INSTRUMENT       Inflation data source (default: INF)" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  Note: Parameters are strategy-specific. Future strategies may support" << std::endl;
-        std::cout << "        additional parameters like rebalance:monthly, risk_model:var, etc." << std::endl;
+        std::cout << "CREATE OPTIONS:" << std::endl;
+        std::cout << "  -n, --name NAME         Portfolio name (required)" << std::endl;
+        std::cout << "  -d, --description DESC  Portfolio description" << std::endl;
+        std::cout << "  --capital AMOUNT        Initial capital" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "DATABASE OPTIONS:" << std::endl;
-        std::cout << "  --db TYPE                    Database type (InMemory, SQLite)" << std::endl;
-        std::cout << "  --db-path PATH               Database file path" << std::endl;
-        std::cout << "  --initial-capital AMOUNT     Override portfolio capital" << std::endl;
-        std::cout << std::endl;
-
-        std::cout << "TAX OPTIONS:" << std::endl;
-        std::cout << "  --enable-tax                 Enable tax calculation (NDFL)" << std::endl;
-        std::cout << "  --ndfl-rate RATE             NDFL rate (default: 0.13)" << std::endl;
-        std::cout << "  --no-long-term-exemption     Disable 3+ year exemption" << std::endl;
-        std::cout << "  --lot-method METHOD          Lot selection (FIFO, LIFO, MinTax)" << std::endl;
-        std::cout << "  --import-losses AMOUNT       Import losses from previous year (RUB)" << std::endl;
+        std::cout << "SET-PARAM OPTIONS:" << std::endl;
+        std::cout << "  -p, --portfolio NAME    Portfolio name (required)" << std::endl;
+        std::cout << "  -P key:value            Parameter to set (can be repeated)" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
-        std::cout << std::endl;
+        std::cout << "  portfolio portfolio create -n MyPort --capital 100000" << std::endl;
+        std::cout << "  portfolio portfolio list" << std::endl;
+        std::cout << "  portfolio portfolio show -p MyPort" << std::endl;
+        std::cout << "  portfolio portfolio set-param -p MyPort -P tax:true -P ndfl_rate:0.15" << std::endl;
 
-        std::cout << "  # Basic backtest with defaults" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p MyPortfolio \\" << std::endl;
-        std::cout << "    --from 2024-01-01 --to 2024-12-31" << std::endl;
-        std::cout << std::endl;
+    } else if (topic == "strategy") {
+        std::cout << "COMMAND: strategy" << std::endl;
+        std::cout << "Execute trading strategies and view parameters" << std::endl << std::endl;
 
-        std::cout << "  # With custom calendar" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p MyPortfolio \\" << std::endl;
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list                    List available strategies" << std::endl;
+        std::cout << "  params [-s STRATEGY]    Show strategy parameters" << std::endl;
+        std::cout << "  execute                 Execute strategy backtest" << std::endl << std::endl;
+
+        std::cout << "PARAMS OPTIONS:" << std::endl;
+        std::cout << "  -s, --strategy NAME     Show parameters for specific strategy" << std::endl;
+        std::cout << "                          (omit to see common parameters)" << std::endl << std::endl;
+
+        std::cout << "EXECUTE OPTIONS:" << std::endl;
+        std::cout << "  -s, --strategy NAME     Strategy name (required)" << std::endl;
+        std::cout << "  -p, --portfolio NAME    Portfolio name (required)" << std::endl;
+        std::cout << "  --from YYYY-MM-DD       Start date (required)" << std::endl;
+        std::cout << "  --to YYYY-MM-DD         End date (required)" << std::endl;
+        std::cout << "  -P key:value            Override parameters (repeatable)" << std::endl;
+        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl << std::endl;
+
+        std::cout << "COMMON PARAMETERS:" << std::endl;
+        std::cout << "  calendar:INSTRUMENT     Trading calendar reference (default: IMOEX)" << std::endl;
+        std::cout << "  inflation:INSTRUMENT    Inflation data source (default: INF)" << std::endl;
+        std::cout << "  tax:true/false          Enable tax calculation (default: false)" << std::endl;
+        std::cout << "  ndfl_rate:0.13          Tax rate 0-1 (default: 0.13)" << std::endl;
+        std::cout << "  long_term_exemption     3+ year exemption (default: true)" << std::endl;
+        std::cout << "  lot_method:FIFO         FIFO, LIFO, MinTax (default: FIFO)" << std::endl;
+        std::cout << "  import_losses:0         Previous losses in RUB (default: 0)" << std::endl;
+        std::cout << "  initial_capital:100000  Override portfolio capital" << std::endl << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # List available strategies" << std::endl;
+        std::cout << "  portfolio strategy list" << std::endl << std::endl;
+
+        std::cout << "  # Show common parameters" << std::endl;
+        std::cout << "  portfolio strategy params" << std::endl << std::endl;
+
+        std::cout << "  # Show parameters for specific strategy" << std::endl;
+        std::cout << "  portfolio strategy params -s BuyHold" << std::endl << std::endl;
+
+        std::cout << "  # Execute with default parameters" << std::endl;
+        std::cout << "  portfolio strategy execute -s BuyHold -p MyPort \\" << std::endl;
+        std::cout << "    --from 2024-01-01 --to 2024-12-31" << std::endl << std::endl;
+
+        std::cout << "  # Execute with custom parameters" << std::endl;
+        std::cout << "  portfolio strategy execute -s BuyHold -p MyPort \\" << std::endl;
         std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    -P calendar:RTSI" << std::endl;
-        std::cout << std::endl;
+        std::cout << "    -P tax:true -P lot_method:MinTax -P ndfl_rate:0.15" << std::endl << std::endl;
 
-        std::cout << "  # Multiple parameters" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p MyPortfolio \\" << std::endl;
-        std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    -P calendar:RTSI -P inflation:CPI_CORE" << std::endl;
-        std::cout << std::endl;
+        std::cout << "  # Save parameters to portfolio" << std::endl;
+        std::cout << "  portfolio portfolio set-param -p MyPort \\" << std::endl;
+        std::cout << "    -P tax:true -P lot_method:MinTax" << std::endl << std::endl;
 
-        std::cout << "  # With tax calculation" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p MyPortfolio \\" << std::endl;
-        std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    -P calendar:IMOEX \\" << std::endl;
-        std::cout << "    --enable-tax --lot-method MinTax --ndfl-rate 0.15" << std::endl;
-        std::cout << std::endl;
-
-        std::cout << "  # Complex example" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p GlobalPortfolio \\" << std::endl;
-        std::cout << "    --from 2020-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    --initial-capital 1000000 \\" << std::endl;
-        std::cout << "    -P calendar:SPX -P inflation:CPI_US \\" << std::endl;
-        std::cout << "    --db SQLite --db-path ./data/portfolio.db \\" << std::endl;
-        std::cout << "    --enable-tax --lot-method MinTax --import-losses 50000" << std::endl;
-        std::cout << std::endl;
+        std::cout << "NOTE: Parameters set with 'set-param' are saved with portfolio" << std::endl;
+        std::cout << "      and used automatically. Command-line -P overrides saved values." << std::endl;
 
     } else if (topic == "source") {
         std::cout << "COMMAND: source" << std::endl;
         std::cout << "Manage data sources" << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  list                    List all data sources" << std::endl << std::endl;
+        std::cout << "  list                    List all data sources" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  portfolio source list" << std::endl;
+
+    } else if (topic == "plugin") {
+        std::cout << "COMMAND: plugin" << std::endl;
+        std::cout << "Manage system plugins" << std::endl << std::endl;
+
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list [TYPE]             List plugins (database, strategy)" << std::endl;
+        std::cout << "  info NAME               Show plugin information" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  portfolio plugin list" << std::endl;
+        std::cout << "  portfolio plugin list database" << std::endl;
+        std::cout << "  portfolio plugin list strategy" << std::endl;
 
     } else {
-        std::cout << "STRATEGY COMMANDS:" << std::endl;
-        std::cout << "  strategy list           List available strategies" << std::endl;
-        std::cout << "  strategy execute -s STRATEGY" << std::endl;
-        std::cout << "    Execute backtest with parameters:" << std::endl;
-        std::cout << "    -P key:value          Strategy parameters (repeatable)" << std::endl;
-        std::cout << "    Example: -P calendar:RTSI -P inflation:CPI" << std::endl;
-        std::cout << std::endl;
+        std::cout << "Unknown help topic: " << topic << std::endl;
+        std::cout << "Available topics: portfolio, strategy, source, plugin" << std::endl;
     }
 
-    std::cout << std::string(70, '=') << "\n" << std::endl;
+    std::cout << std::endl;
 }
-
-
-
-
 
 void CommandExecutor::printVersion() const
 {
@@ -789,18 +762,16 @@ std::expected<void, std::string> CommandExecutor::executePortfolioAddInstrument(
     }
 
     double weight = 0.5;
-    auto weightIt = cmd.options.find("weight");
-    if (weightIt != cmd.options.end()) {
-        weight = weightIt->second.as<double>();
+    if (cmd.options.count("weight")) {
+        weight = cmd.options.at("weight").as<double>();
     }
-
     auto loadResult = loadPortfolioFromFile(portfolioResult.value());
     if (!loadResult) {
         return std::unexpected(loadResult.error());
     }
 
     Portfolio portfolio = loadResult.value();
-    auto addResult = portfolio.addStock(PortfolioStock{instrumentResult.value(), 1.0});
+    auto addResult = portfolio.addStock(PortfolioStock{instrumentResult.value(),weight});
     if (!addResult) {
         return std::unexpected(addResult.error());
     }
@@ -842,39 +813,109 @@ std::expected<void, std::string> CommandExecutor::executePortfolioRemoveInstrume
 std::expected<void, std::string> CommandExecutor::executeStrategy(const ParsedCommand& cmd)
 {
     if (cmd.subcommand.empty()) {
-        std::cout << "Use 'portfolio strategy --help' for usage information" << std::endl;
+        std::cout << "\nSTRATEGY COMMANDS:" << std::endl;
+        std::cout << "  strategy list                List available strategies" << std::endl;
+        std::cout << "  strategy params -s STRATEGY Show strategy parameters" << std::endl;
+        std::cout << "  strategy execute -s STRATEGY Execute backtest" << std::endl;
+        std::cout << "\nUse 'portfolio help strategy' for detailed information" << std::endl;
+        std::cout << std::endl;
         return {};
     }
 
     if (cmd.subcommand == "list") {
         return executeStrategyList(cmd);
-    } else if (cmd.subcommand == "requirements") {
-        return executeStrategyRequirements(cmd);
+    } else if (cmd.subcommand == "params") {
+        return executeStrategyParams(cmd);
     } else if (cmd.subcommand == "execute") {
         return executeStrategyExecute(cmd);
     } else {
-        return std::unexpected("Unknown strategy subcommand: " + cmd.subcommand);
+        return std::unexpected("Unknown strategy subcommand: " + cmd.subcommand +
+                               "\nUse 'portfolio strategy' to see available commands");
     }
 }
 
-
-std::expected<void, std::string> CommandExecutor::executeStrategyRequirements(
-    const ParsedCommand& /*cmd*/)
+std::expected<void, std::string> CommandExecutor::executeStrategyParams(
+    const ParsedCommand& cmd)
 {
-    std::cout << "Strategy requirements not yet implemented." << std::endl;
+    std::string strategyName;
+
+    if (cmd.options.count("strategy")) {
+        strategyName = cmd.options.at("strategy").as<std::string>();
+    } else {
+        // Показываем общий список параметров
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "DEFAULT STRATEGY PARAMETERS" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+
+        std::cout << "Use: portfolio strategy params -s STRATEGY" << std::endl;
+        std::cout << "to see parameters for a specific strategy" << std::endl << std::endl;
+
+        std::cout << "COMMON PARAMETERS (available in all strategies):" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "Trading Calendar:" << std::endl;
+        std::cout << "  calendar                     Reference instrument (default: IMOEX)" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "Inflation Adjustment:" << std::endl;
+        std::cout << "  inflation                    Inflation instrument (default: INF)" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "Tax Calculation (Russian NDFL):" << std::endl;
+        std::cout << "  tax                          Enable/disable (default: false)" << std::endl;
+        std::cout << "  ndfl_rate                    Tax rate 0-1 (default: 0.13)" << std::endl;
+        std::cout << "  long_term_exemption          3+ year exemption (default: true)" << std::endl;
+        std::cout << "  lot_method                   FIFO, LIFO, MinTax (default: FIFO)" << std::endl;
+        std::cout << "  import_losses                Previous losses in RUB (default: 0)" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+        return {};
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Показываем параметры конкретной стратегии
+    // ════════════════════════════════════════════════════════════════════
+
+    auto strategyResult = strategyPluginManager_ -> loadStrategyPlugin(strategyName,"");
+    if (!strategyResult) {
+        return std::unexpected(strategyResult.error());
+    }
+    auto strategy = strategyResult.value();
+
+    auto defaults = strategy->getDefaultParameters();
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "STRATEGY: " << strategy->getName() << " v" << strategy->getVersion() << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << strategy->getDescription() << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    std::cout << "DEFAULT PARAMETERS:" << std::endl;
+    for (const auto& [key, value] : defaults) {
+        std::cout << "  " << std::left << std::setw(25) << key
+                  << " = " << value << std::endl;
+    }
+
+    std::cout << std::endl;
+    std::cout << "USAGE:" << std::endl;
+    std::cout << "  portfolio strategy execute -s " << strategy->getName()
+              << " -p MyPort \\" << std::endl;
+    std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
+    std::cout << "    -P param_name:custom_value" << std::endl;
+
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
     return {};
 }
+
 
 std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     const ParsedCommand& cmd)
 {
-    std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "STRATEGY EXECUTION" << std::endl;
-    std::cout << std::string(70, '=') << std::endl << std::endl;
-
-    // ========================================================================
-    // 1. Получаем обязательные параметры
-    // ========================================================================
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение обязательных параметров
+    // ════════════════════════════════════════════════════════════════════════
 
     auto strategyNameResult = getRequiredOption<std::string>(cmd, "strategy");
     if (!strategyNameResult) {
@@ -888,307 +929,287 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     }
     std::string portfolioName = portfolioNameResult.value();
 
-    auto fromDateStrResult = getRequiredOption<std::string>(cmd, "from");
-    if (!fromDateStrResult) {
-        return std::unexpected(fromDateStrResult.error());
-    }
-
-    auto toDateStrResult = getRequiredOption<std::string>(cmd, "to");
-    if (!toDateStrResult) {
-        return std::unexpected(toDateStrResult.error());
-    }
-
-    // ========================================================================
-    // 2. Парсим даты
-    // ========================================================================
-
-    auto fromDateResult = parseDateString(fromDateStrResult.value());
+    auto fromDateResult = getRequiredOption<std::string>(cmd, "from");
     if (!fromDateResult) {
         return std::unexpected(fromDateResult.error());
     }
-    TimePoint fromDate = fromDateResult.value();
 
-    auto toDateResult = parseDateString(toDateStrResult.value());
+    auto toDateResult = getRequiredOption<std::string>(cmd, "to");
     if (!toDateResult) {
         return std::unexpected(toDateResult.error());
     }
-    TimePoint toDate = toDateResult.value();
 
-    if (toDate <= fromDate) {
+    // ════════════════════════════════════════════════════════════════════════
+    // Парсинг дат
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto startDate = parseDateString(fromDateResult.value());
+    if (!startDate) {
+        return std::unexpected(startDate.error());
+    }
+
+    auto endDate = parseDateString(toDateResult.value());
+    if (!endDate) {
+        return std::unexpected(endDate.error());
+    }
+
+    if (*endDate <= *startDate) {
         return std::unexpected("End date must be after start date");
     }
 
-    // ========================================================================
-    // 3. Загружаем портфель
-    // ========================================================================
+    // ════════════════════════════════════════════════════════════════════════
+    // Загрузка плагина стратегии
+    // ════════════════════════════════════════════════════════════════════════
 
-    std::cout << "Loading portfolio: " << portfolioName << "..." << std::endl;
-    auto portfolioInfoResult = portfolioManager_->getPortfolio(portfolioName);
-    if (!portfolioInfoResult) {
-        return std::unexpected("Failed to load portfolio: " + portfolioInfoResult.error());
+    auto strategyResult = strategyPluginManager_ -> loadStrategyPlugin(strategyName,"");
+    if (!strategyResult) {
+        return std::unexpected(strategyResult.error());
     }
-    const auto& portfolioInfo = portfolioInfoResult.value();
-    std::cout << "✓ Portfolio loaded: " << portfolioInfo.instruments.size()
-              << " instruments" << std::endl << std::endl;
+    auto strategy = strategyResult.value();
 
-    // ========================================================================
-    // 4. Определяем начальный капитал
-    // ========================================================================
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "STRATEGY: " << strategy->getName() << " v" << strategy->getVersion() << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << strategy->getDescription() << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
 
-    double initialCapital = portfolioInfo.initialCapital;
-    if (cmd.options.count("initial-capital")) {
-        initialCapital = cmd.options.at("initial-capital").as<double>();
-        std::cout << "Using custom initial capital: $" << initialCapital << std::endl;
+    // ════════════════════════════════════════════════════════════════════════
+    // Загрузка портфеля
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto portfolioResult = portfolioManager_->getPortfolio(portfolioName);
+    if (!portfolioResult) {
+        return std::unexpected(portfolioResult.error());
     }
+    auto portfolioInfo = portfolioResult.value();
 
-    if (initialCapital <= 0.0) {
-        return std::unexpected("Initial capital must be positive");
-    }
-
-    // ========================================================================
-    // 5. Инициализируем базу данных
-    // ========================================================================
-
-    std::string dbType = "InMemory";
-    std::string dbPath;
-    if (cmd.options.count("db")) {
-        dbType = cmd.options.at("db").as<std::string>();
-    }
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
+    if (portfolioInfo.instruments.empty()) {
+        return std::unexpected("Portfolio has no instruments");
     }
 
-    std::cout << "Initializing database (" << dbType << ")..." << std::endl;
-    auto dbResult = ensureDatabase(dbType, dbPath);
-    if (!dbResult) {
-        return std::unexpected(dbResult.error());
-    }
-    std::cout << "✓ Database initialized" << std::endl << std::endl;
+    // ════════════════════════════════════════════════════════════════════════
+    // Подготовка параметров стратегии
+    // ════════════════════════════════════════════════════════════════════════
 
-    // ========================================================================
-    // 6. Создаем налоговый калькулятор (если включено)
-    // ========================================================================
-
-    std::shared_ptr<TaxCalculator> taxCalc;
-
-    if (cmd.options.count("enable-tax") && cmd.options.at("enable-tax").as<bool>()) {
-        std::cout << "Configuring tax calculator..." << std::endl;
-
-        taxCalc = std::make_shared<TaxCalculator>();
-
-        // Настраиваем ставку НДФЛ
-        if (cmd.options.count("ndfl-rate")) {
-            double rate = cmd.options.at("ndfl-rate").as<double>();
-            if (rate < 0.0 || rate > 1.0) {
-                return std::unexpected("NDFL rate must be between 0 and 1");
-            }
-            taxCalc->setNdflRate(rate);
-            std::cout << "  NDFL rate: " << (rate * 100) << "%" << std::endl;
-        } else {
-            std::cout << "  NDFL rate: 13% (default)" << std::endl;
-        }
-
-        // Настраиваем льготу 3+ года
-        if (cmd.options.count("no-long-term-exemption") &&
-            cmd.options.at("no-long-term-exemption").as<bool>()) {
-            taxCalc->setLongTermExemption(false);
-            std::cout << "  Long-term exemption: disabled" << std::endl;
-        } else {
-            taxCalc->setLongTermExemption(true);
-            std::cout << "  Long-term exemption: enabled (3+ years)" << std::endl;
-        }
-
-        if (cmd.options.count("lot-method")) {
-            std::string method = cmd.options.at("lot-method").as<std::string>();
-
-            if (method == "FIFO") {
-                taxCalc->setLotSelectionMethod(LotSelectionMethod::FIFO);
-            } else if (method == "LIFO") {
-                taxCalc->setLotSelectionMethod(LotSelectionMethod::LIFO);
-            } else if (method == "MinTax" || method == "MinimizeTax") {
-                taxCalc->setLotSelectionMethod(LotSelectionMethod::MinimizeTax);
-            } else {
-                return std::unexpected("Invalid lot selection method: " + method +
-                                       ". Valid options: FIFO, LIFO, MinTax");
-            }
-        }
-
-        // Импортируем убытки с прошлого года
-        if (cmd.options.count("import-losses")) {
-            double losses = cmd.options.at("import-losses").as<double>();
-            if (losses < 0.0) {
-                return std::unexpected("Import losses must be non-negative");
-            }
-            if (losses > 0.0) {
-                taxCalc->setCarryforwardLoss(losses);
-                std::cout << "  Imported carryforward losses: ₽" << losses << std::endl;
-            }
-        }
-
-        std::cout << "✓ Tax calculator configured" << std::endl << std::endl;
-    }
-
-    // ========================================================================
-    // 9. Создаем параметры портфеля
-    // ========================================================================
-
-    portfolio::IPortfolioStrategy::PortfolioParams params;
+    IPortfolioStrategy::PortfolioParams params;
     params.instrumentIds = portfolioInfo.instruments;
     params.weights = portfolioInfo.weights;
-    params.initialCapital = initialCapital;
-    params.reinvestDividends = true;
+    params.initialCapital = portfolioInfo.initialCapital;
 
-    // ✅ Устанавливаем значения по умолчанию
-    params.setParameter("calendar", "IMOEX");
-    params.setParameter("inflation", "INF");
+    // ✅ Шаг 1: Получаем параметры по умолчанию от стратегии
+    std::cout << "Loading default parameters from strategy..." << std::endl;
+    auto defaultParams = strategy->getDefaultParameters();
+    for (const auto& [key, value] : defaultParams) {
+        params.setParameter(key, value);
+    }
 
-    // ✅ МЕСТО ВСТАВКИ: парсим параметры из командной строки
+    // ✅ Шаг 2: Применяем сохранённые параметры из портфеля (переопределяют умолчания)
+    if (!portfolioInfo.parameters.empty()) {
+        std::cout << "Loading saved parameters from portfolio..." << std::endl;
+        for (const auto& [key, value] : portfolioInfo.parameters) {
+            params.setParameter(key, value);
+            std::cout << "  " << key << " = " << value << std::endl;
+        }
+    }
+
+    // ✅ Шаг 3: Парсим параметры из командной строки (переопределяют всё)
     if (cmd.options.count("param")) {
         auto paramStrings = cmd.options.at("param").as<std::vector<std::string>>();
 
-        std::cout << "Parsing strategy parameters..." << std::endl;
+        std::cout << "Parsing command-line parameters..." << std::endl;
 
         for (const auto& paramStr : paramStrings) {
             auto parseResult = parseParameter(paramStr);
-
             if (!parseResult) {
                 return std::unexpected(parseResult.error());
             }
 
             const auto& [key, value] = *parseResult;
             params.setParameter(key, value);
-
             std::cout << "  " << key << " = " << value << std::endl;
         }
+    }
 
-        // ✅ ВОТ СЮДА: валидация параметров
-        auto validationResult = validateStrategyParameters(params.parameters);
-        if (!validationResult) {
-            // Это warning, не останавливаем выполнение
-            std::cout << "⚠ " << validationResult.error() << std::endl;
+    std::cout << std::endl;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Определение начального капитала
+    // ════════════════════════════════════════════════════════════════════════
+
+    double initialCapital = portfolioInfo.initialCapital;
+
+    if (params.hasParameter("initial_capital")) {
+        try {
+            initialCapital = std::stod(params.getParameter("initial_capital"));
+            std::cout << "Using custom initial capital: $" << initialCapital << std::endl;
+        } catch (const std::exception& e) {
+            return std::unexpected(
+                std::string("Invalid initial_capital parameter: ") + e.what());
         }
-
-        std::cout << std::endl;
-    } else {
-        // Выводим значения по умолчанию
-        std::cout << "Using default strategy parameters:" << std::endl;
-        std::cout << "  calendar = " << params.getParameter("calendar") << std::endl;
-        std::cout << "  inflation = " << params.getParameter("inflation") << std::endl;
-        std::cout << std::endl;
     }
 
-    // ========================================================================
-    // 7. Загружаем плагин стратегии
-    // ========================================================================
-
-    std::cout << "Loading strategy plugin: " << strategyName << "..." << std::endl;
-
-    std::string pluginName = strategyName;
-    std::transform(pluginName.begin(), pluginName.end(),
-                   pluginName.begin(), ::tolower);
-    pluginName += "_strategy";
-
-    const char* envPluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
-    std::string pluginBasePath = envPluginPath ? envPluginPath : "./plugins";
-    std::string pluginPath = pluginBasePath + "/strategy/" + pluginName + ".so";
-
-    std::cout << "  Plugin path: " << pluginPath << std::endl;
-
-    dlerror();
-    void* handle = dlopen(pluginPath.c_str(), RTLD_LAZY);
-    if (!handle) {
-        const char* error = dlerror();
-        return std::unexpected("Failed to load strategy plugin: " +
-                               std::string(error ? error : "unknown error"));
+    if (initialCapital <= 0) {
+        return std::unexpected("Initial capital must be positive");
     }
 
-    using CreateStrategyFunc = portfolio::IPortfolioStrategy* (*)(const char*);
-    using DestroyStrategyFunc = void (*)(portfolio::IPortfolioStrategy*);
+    // ════════════════════════════════════════════════════════════════════════
+    // Инициализация базы данных
+    // ════════════════════════════════════════════════════════════════════════
 
-    dlerror();
-    auto createStrategy = reinterpret_cast<CreateStrategyFunc>(
-        dlsym(handle, "createStrategy"));
-    const char* createError = dlerror();
-    if (createError) {
-        dlclose(handle);
-        return std::unexpected("Failed to find createStrategy symbol: " +
-                               std::string(createError));
+    // ✅ ИСПРАВЛЕНО: передаём dbType и dbPath из опций
+    std::string dbType = "InMemory";
+    std::string dbPath;
+
+    if (cmd.options.count("db")) {
+        dbType = cmd.options.at("db").as<std::string>();
     }
 
-    auto destroyStrategy = reinterpret_cast<DestroyStrategyFunc>(
-        dlsym(handle, "destroyStrategy"));
-    const char* destroyError = dlerror();
-    if (destroyError) {
-        dlclose(handle);
-        return std::unexpected("Failed to find destroyStrategy symbol: " +
-                               std::string(destroyError));
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
     }
 
-    if (!createStrategy || !destroyStrategy) {
-        dlclose(handle);
-        return std::unexpected("Failed to find required plugin symbols");
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
     }
-
-    portfolio::IPortfolioStrategy* strategy = createStrategy("");
-    if (!strategy) {
-        dlclose(handle);
-        return std::unexpected("Failed to create strategy instance");
-    }
-
-    std::cout << "✓ Strategy loaded: " << strategy->getName()
-              << " v" << strategy->getVersion() << std::endl;
-    std::cout << "  Description: " << strategy->getDescription() << std::endl << std::endl;
-
-    // ========================================================================
-    // 8. Устанавливаем базу данных и налоговый калькулятор
-    // ========================================================================
 
     strategy->setDatabase(database_);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Создание налогового калькулятора (на основе параметров)
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::shared_ptr<TaxCalculator> taxCalc;
+
+    std::string taxEnabled = params.getParameter("tax", "false");
+
+    // Распознаём различные варианты "истины"
+    if (taxEnabled == "true" || taxEnabled == "1" || taxEnabled == "yes" || taxEnabled == "on") {
+        std::cout << "Configuring tax calculator..." << std::endl;
+
+        taxCalc = std::make_shared<TaxCalculator>();
+
+        // ────────────────────────────────────────────────────────────────────
+        // Ставка НДФЛ
+        // ────────────────────────────────────────────────────────────────────
+
+        try {
+            double ndflRate = std::stod(params.getParameter("ndfl_rate", "0.13"));
+
+            if (ndflRate < 0.0 || ndflRate > 1.0) {
+                return std::unexpected("NDFL rate must be between 0 and 1");
+            }
+
+            taxCalc->setNdflRate(ndflRate);
+            std::cout << "  NDFL rate: " << (ndflRate * 100) << "%" << std::endl;
+
+        } catch (const std::exception& e) {
+            return std::unexpected(
+                std::string("Invalid ndfl_rate parameter: ") + e.what());
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Льгота 3+ года
+        // ────────────────────────────────────────────────────────────────────
+
+        std::string exemption = params.getParameter("long_term_exemption", "true");
+        bool exemptionEnabled = (exemption == "true" ||
+                                 exemption == "1" ||
+                                 exemption == "yes" ||
+                                 exemption == "on");
+
+        taxCalc->setLongTermExemption(exemptionEnabled);
+        std::cout << "  Long-term exemption: "
+                  << (exemptionEnabled ? "enabled" : "disabled") << std::endl;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Метод выбора лотов
+        // ────────────────────────────────────────────────────────────────────
+
+        std::string lotMethod = params.getParameter("lot_method", "FIFO");
+
+        if (lotMethod == "FIFO") {
+            taxCalc->setLotSelectionMethod(LotSelectionMethod::FIFO);
+        } else if (lotMethod == "LIFO") {
+            taxCalc->setLotSelectionMethod(LotSelectionMethod::LIFO);
+        } else if (lotMethod == "MinTax" || lotMethod == "MinimizeTax") {
+            taxCalc->setLotSelectionMethod(LotSelectionMethod::MinimizeTax);
+        } else {
+            return std::unexpected("Invalid lot selection method: " + lotMethod +
+                                   ". Valid values: FIFO, LIFO, MinTax");
+        }
+
+        std::cout << "  Lot selection method: " << lotMethod << std::endl;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Импорт убытков с прошлого года
+        // ────────────────────────────────────────────────────────────────────
+
+        try {
+            double importLosses = std::stod(params.getParameter("import_losses", "0"));
+
+            if (importLosses < 0.0) {
+                return std::unexpected("Import losses must be non-negative");
+            }
+
+            if (importLosses > 0.0) {
+                taxCalc->setCarryforwardLoss(importLosses);
+                std::cout << "  Imported carryforward losses: ₽"
+                          << std::fixed << std::setprecision(2) << importLosses
+                          << std::endl;
+            }
+
+        } catch (const std::exception& e) {
+            return std::unexpected(
+                std::string("Invalid import_losses parameter: ") + e.what());
+        }
+
+        std::cout << "✓ Tax calculator configured" << std::endl << std::endl;
+    }
 
     if (taxCalc) {
         strategy->setTaxCalculator(taxCalc);
     }
 
-    // ========================================================================
-    // 10. Выполняем бэктест
-    // ========================================================================
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод сводки перед выполнением
+    // ════════════════════════════════════════════════════════════════════════
 
-    std::cout << "Running backtest..." << std::endl;
-    std::cout << "  Period: " << fromDateStrResult.value()
-              << " to " << toDateStrResult.value() << std::endl;
-    std::cout << "  Initial Capital: $" << initialCapital << std::endl;
-    std::cout << std::string(70, '-') << std::endl << std::endl;
+    std::cout << "Portfolio: " << portfolioInfo.name << std::endl;
+    std::cout << "Period: " << fromDateResult.value()
+              << " to " << toDateResult.value() << std::endl;
+    std::cout << "Initial Capital: $" << std::fixed << std::setprecision(2)
+              << initialCapital << std::endl;
+    std::cout << "Instruments: " << portfolioInfo.instruments.size() << std::endl;
 
-    auto backtestResult = strategy->backtest(params, fromDate, toDate, initialCapital);
+    // Показываем ключевые параметры
+    if (params.hasParameter("calendar")) {
+        std::cout << "Calendar Reference: " << params.getParameter("calendar") << std::endl;
+    }
+    if (params.hasParameter("inflation")) {
+        std::cout << "Inflation Instrument: " << params.getParameter("inflation") << std::endl;
+    }
+    if (taxCalc) {
+        std::cout << "Tax Calculation: ENABLED" << std::endl;
+    }
 
-    // ========================================================================
-    // 11. Очищаем ресурсы
-    // ========================================================================
+    std::cout << std::string(70, '=') << std::endl << std::endl;
 
-    destroyStrategy(strategy);
-    dlclose(handle);
+    // ════════════════════════════════════════════════════════════════════════
+    // Выполнение бэктеста
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto backtestResult = strategy->backtest(params, *startDate, *endDate, initialCapital);
 
     if (!backtestResult) {
-        return std::unexpected("Backtest failed: " + backtestResult.error());
+        return std::unexpected(backtestResult.error());
     }
 
-    // ========================================================================
-    // 12. Выводим результаты
-    // ========================================================================
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод результатов
+    // ════════════════════════════════════════════════════════════════════════
 
-    const auto& result = backtestResult.value();
-    printBacktestResults(result);
-
-    if (taxCalc) {
-        printTaxResults(result);
-
-        // Экспортируем перенос убытков
-        double carryforward = taxCalc->getCarryforwardLoss();
-        if (carryforward > 0.0) {
-            std::cout << "NOTE: To use carryforward losses next year, run:" << std::endl;
-            std::cout << "  --import-losses " << carryforward << std::endl << std::endl;
-        }
-    }
+    printBacktestResult(backtestResult.value());
 
     return {};
 }

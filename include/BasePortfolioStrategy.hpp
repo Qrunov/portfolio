@@ -37,6 +37,30 @@ protected:
     // Хранилище налоговых лотов
     std::map<std::string, std::vector<TaxLot>> instrumentLots_;
 
+    // ════════════════════════════════════════════════════════════════════
+    // Параметры по умолчанию (базовые для всех стратегий)
+    // ════════════════════════════════════════════════════════════════════
+
+    std::map<std::string, std::string> getDefaultParameters() const override {
+        std::map<std::string, std::string> defaults;
+
+        // Trading Calendar
+        defaults["calendar"] = "IMOEX";
+
+        // Inflation Adjustment
+        defaults["inflation"] = "INF";
+
+        // Tax Calculation (Russian NDFL)
+        defaults["tax"] = "false";
+        defaults["ndfl_rate"] = "0.13";
+        defaults["long_term_exemption"] = "true";
+        defaults["lot_method"] = "FIFO";
+        defaults["import_losses"] = "0";
+
+        return defaults;
+    }
+
+
     // ═════════════════════════════════════════════════════════════════════════
     // Инициализация торгового календаря
     // ═════════════════════════════════════════════════════════════════════════

@@ -30,119 +30,166 @@ TradingCalendar::TradingCalendar(
 // ═══════════════════════════════════════════════════════════════════════════════
 // Создание календаря
 // ═══════════════════════════════════════════════════════════════════════════════
-
-std::expected<TradingCalendar, std::string> TradingCalendar::create(
+std::expected<std::unique_ptr<TradingCalendar>, std::string>
+TradingCalendar::create(
     std::shared_ptr<IPortfolioDatabase> database,
     const std::vector<std::string>& instrumentIds,
     const TimePoint& startDate,
     const TimePoint& endDate,
-    std::string_view referenceInstrument)
+    const std::string& referenceInstrument)
 {
-    if (!database) {
-        return std::unexpected("Database is null");
-    }
-
-    if (instrumentIds.empty()) {
-        return std::unexpected("Instrument list is empty");
-    }
-
-    if (endDate <= startDate) {
-        return std::unexpected("End date must be after start date");
-    }
-
-    std::string actualReference(referenceInstrument);
-    bool usedAlternative = false;
-    std::set<TimePoint> tradingDays;
-
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "Trading Calendar Initialization" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
-    std::cout << "Reference instrument: " << referenceInstrument << std::endl;
 
-    // Пытаемся загрузить эталонный инструмент
-    auto refPrices = database->getAttributeHistory(
-        referenceInstrument, "close", startDate, endDate, "");
+    if (!database) {
+        return std::unexpected("Database is not initialized");
+    }
 
-    if (refPrices && !refPrices->empty()) {
-        // Эталон найден
-        std::cout << "✓ Reference instrument found: "
-                  << refPrices->size() << " trading days" << std::endl;
+    if (instrumentIds.empty()) {
+        return std::unexpected("No instruments provided");
+    }
 
-        for (const auto& [timestamp, value] : *refPrices) {
-            tradingDays.insert(normalizeDate(timestamp));
+    std::string selectedInstrument;
+    std::size_t selectedDays = 0;
+    bool usedAlternative = false;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 1: Проверяем референсный инструмент (если указан)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (!referenceInstrument.empty()) {
+        std::cout << "Reference instrument: " << referenceInstrument << std::endl;
+
+        // ✅ Получаем все даты для референсного инструмента
+        std::vector<TimePoint> refDates;
+        auto current = startDate;
+
+        while (current <= endDate) {
+            auto valueResult = database->getAttributeHistory(
+                referenceInstrument, "close", startDate, endDate);
+
+            if (valueResult) {
+                refDates.push_back(current);
+            }
+
+            // Переходим к следующему дню
+            current += std::chrono::hours(24);
         }
 
-    } else {
-        // Эталон не найден - ищем альтернативу
-        std::cout << "⚠ Reference instrument not available" << std::endl;
-        std::cout << "Searching for alternative with most trading days..."
-                  << std::endl;
+        if (!refDates.empty()) {
+            selectedInstrument = referenceInstrument;
+            selectedDays = refDates.size();
+            usedAlternative = false;
 
-        std::string bestInstrument;
-        std::size_t maxDays = 0;
+            std::cout << "✓ Reference available: " << selectedDays << " days" << std::endl;
+        } else {
+            std::cout << "⚠ Reference instrument not available" << std::endl;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 2: Если референс недоступен - ищем альтернативу среди портфеля
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (selectedInstrument.empty()) {
+        std::cout << "Searching for alternative with most trading days..." << std::endl;
+
+        std::map<std::string, std::size_t> portfolioDays;
 
         for (const auto& instrumentId : instrumentIds) {
-            auto prices = database->getAttributeHistory(
-                instrumentId, "close", startDate, endDate, "");
+            std::vector<TimePoint> dates;
+            auto current = startDate;
 
-            if (prices && !prices->empty()) {
-                std::size_t dayCount = prices->size();
-                std::cout << "  " << instrumentId << ": "
-                          << dayCount << " days" << std::endl;
+            while (current <= endDate) {
+                auto valueResult = database->getAttributeHistory(
+                    instrumentId, "close", startDate, endDate);
 
-                if (dayCount > maxDays) {
-                    maxDays = dayCount;
-                    bestInstrument = instrumentId;
+                if (valueResult) {
+                    dates.push_back(current);
                 }
+
+                current += std::chrono::hours(24);
+            }
+
+            if (!dates.empty()) {
+                portfolioDays[instrumentId] = dates.size();
+                std::cout << "  " << instrumentId << ": "
+                          << dates.size() << " days" << std::endl;
             }
         }
 
-        if (bestInstrument.empty()) {
+        if (portfolioDays.empty()) {
             return std::unexpected(
                 "No instruments have price data in the specified period");
         }
 
-        actualReference = bestInstrument;
-        usedAlternative = true;
-
-        std::cout << "\n✓ Using alternative: " << actualReference
-                  << " (" << maxDays << " days)" << std::endl;
-
-        // Загружаем данные альтернативы
-        auto altPrices = database->getAttributeHistory(
-            actualReference, "close", startDate, endDate, "");
-
-        for (const auto& [timestamp, value] : *altPrices) {
-            tradingDays.insert(normalizeDate(timestamp));
+        // Выбираем инструмент с максимальным количеством дней
+        for (const auto& [instrument, days] : portfolioDays) {
+            if (days > selectedDays) {
+                selectedDays = days;
+                selectedInstrument = instrument;
+            }
         }
+
+        usedAlternative = true;
+        std::cout << "✓ Using alternative: " << selectedInstrument
+                  << " (" << selectedDays << " days)" << std::endl;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 3: Загружаем торговые дни выбранного инструмента
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::set<TimePoint> tradingDays;
+    auto current = startDate;
+
+    while (current <= endDate) {
+        auto valueResult = database->getAttributeHistory(
+            selectedInstrument, "close", startDate, endDate);
+
+        if (valueResult) {
+            tradingDays.insert(current);
+        }
+
+        current += std::chrono::hours(24);
     }
 
     if (tradingDays.empty()) {
-        return std::unexpected("No trading days found");
+        return std::unexpected(
+            "No trading days found for " + selectedInstrument);
     }
 
-    std::cout << "\nCalendar created successfully:" << std::endl;
-    std::cout << "  Trading days: " << tradingDays.size() << std::endl;
-    std::cout << "  First day: ";
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 4: Создаем календарь
+    // ════════════════════════════════════════════════════════════════════════
 
-    auto firstDay = *tradingDays.begin();
-    auto time = std::chrono::system_clock::to_time_t(firstDay);
-    std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d") << std::endl;
-
-    std::cout << "  Last day:  ";
-    auto lastDay = *tradingDays.rbegin();
-    time = std::chrono::system_clock::to_time_t(lastDay);
-    std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d") << std::endl;
-
-    std::cout << std::string(70, '=') << "\n" << std::endl;
-
-    return TradingCalendar(
+    auto calendar = std::make_unique<TradingCalendar>(
         database,
-        std::move(tradingDays),
-        std::move(actualReference),
+        tradingDays,
+        selectedInstrument,
         usedAlternative,
         startDate,
-        endDate);
+        endDate
+        );
+
+    std::cout << "Calendar created successfully:" << std::endl;
+    std::cout << "  Trading days: " << calendar->getTradingDaysCount() << std::endl;
+
+    // ✅ Получаем первый и последний день из set
+    if (!tradingDays.empty()) {
+        auto firstTime = std::chrono::system_clock::to_time_t(*tradingDays.begin());
+        auto lastTime = std::chrono::system_clock::to_time_t(*tradingDays.rbegin());
+
+        std::cout << "  First day: "
+                  << std::put_time(std::localtime(&firstTime), "%Y-%m-%d") << std::endl;
+        std::cout << "  Last day:  "
+                  << std::put_time(std::localtime(&lastTime), "%Y-%m-%d") << std::endl;
+    }
+
+    std::cout << std::string(70, '=') << std::endl;
+
+    return calendar;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -53,6 +53,7 @@ private:
     std::expected<void, std::string> executePortfolioDelete(const ParsedCommand& cmd);
     std::expected<void, std::string> executePortfolioAddInstrument(const ParsedCommand& cmd);
     std::expected<void, std::string> executePortfolioRemoveInstrument(const ParsedCommand& cmd);
+    std::expected<void, std::string> executePortfolioSetParam(const ParsedCommand& cmd);
 
     // Strategy Management
     std::expected<void, std::string> executeStrategy(const ParsedCommand& cmd);

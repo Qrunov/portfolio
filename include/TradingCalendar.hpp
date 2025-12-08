@@ -58,19 +58,27 @@ public:
     TradingCalendar(TradingCalendar&&) noexcept = default;
     TradingCalendar& operator=(TradingCalendar&&) noexcept = default;
 
+
+    TradingCalendar(
+        std::shared_ptr<IPortfolioDatabase> database,
+        std::set<TimePoint> tradingDays,
+        std::string referenceInstrument,
+        bool usedAlternative,
+        TimePoint startDate,
+        TimePoint endDate);
+
     // ───────────────────────────────────────────────────────────────────────────
     // Создание календаря
     // ───────────────────────────────────────────────────────────────────────────
 
     // Создать календарь из эталонного инструмента
     // Если referenceInstrument недоступен - выбрать альтернативу
-    static std::expected<TradingCalendar, std::string> create(
+    static std::expected<std::unique_ptr<TradingCalendar>, std::string> create(
         std::shared_ptr<IPortfolioDatabase> database,
         const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        std::string_view referenceInstrument = "IMOEX");
-
+        const std::string& referenceInstrument);
     // ───────────────────────────────────────────────────────────────────────────
     // Основная функциональность
     // ───────────────────────────────────────────────────────────────────────────
@@ -109,16 +117,8 @@ public:
     TimePoint getStartDate() const noexcept { return startDate_; }
     TimePoint getEndDate() const noexcept { return endDate_; }
 
-private:
-    // Приватный конструктор
-    TradingCalendar(
-        std::shared_ptr<IPortfolioDatabase> database,
-        std::set<TimePoint> tradingDays,
-        std::string referenceInstrument,
-        bool usedAlternative,
-        TimePoint startDate,
-        TimePoint endDate);
 
+private:
     // Вспомогательные методы
     std::expected<TimePoint, std::string> findNextAvailableDate(
         std::string_view instrumentId,

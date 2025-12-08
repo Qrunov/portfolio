@@ -670,6 +670,8 @@ std::expected<void, std::string> CommandExecutor::executePortfolio(const ParsedC
         return executePortfolioAddInstrument(cmd);
     } else if (cmd.subcommand == "remove-instrument") {
         return executePortfolioRemoveInstrument(cmd);
+    } else if (cmd.subcommand == "set-param") {
+        return executePortfolioSetParam(cmd);
     } else {
         return std::unexpected("Unknown portfolio subcommand: " + cmd.subcommand);
     }
@@ -722,19 +724,57 @@ std::expected<void, std::string> CommandExecutor::executePortfolioList(
     return {};
 }
 
-std::expected<void, std::string> CommandExecutor::executePortfolioShow(const ParsedCommand& cmd)
+std::expected<void, std::string> CommandExecutor::executePortfolioShow(
+    const ParsedCommand& cmd)
 {
-    auto nameResult = getRequiredOption<std::string>(cmd, "name");
+    auto nameResult = getRequiredOption<std::string>(cmd, "portfolio");
     if (!nameResult) {
         return std::unexpected(nameResult.error());
     }
 
-    auto result = portfolioManager_->getPortfolio(nameResult.value());
-    if (!result) {
-        return std::unexpected(result.error());
+    auto portfolioResult = portfolioManager_->getPortfolio(nameResult.value());
+    if (!portfolioResult) {
+        return std::unexpected(portfolioResult.error());
     }
 
-    printPortfolioDetails(result.value());
+    const auto& info = portfolioResult.value();
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "PORTFOLIO: " << info.name << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    if (!info.description.empty()) {
+        std::cout << "Description: " << info.description << std::endl;
+    }
+
+    std::cout << "Initial Capital: $" << std::fixed << std::setprecision(2)
+              << info.initialCapital << std::endl;
+    std::cout << "Created: " << info.createdDate << std::endl;
+    std::cout << "Modified: " << info.modifiedDate << std::endl;
+    std::cout << std::endl;
+
+    std::cout << "Instruments (" << info.instruments.size() << "):" << std::endl;
+    for (const auto& instrumentId : info.instruments) {
+        double weight = 0.0;
+        if (info.weights.count(instrumentId)) {
+            weight = info.weights.at(instrumentId);
+        }
+        std::cout << "  " << instrumentId << " (weight: "
+                  << std::setprecision(1) << (weight * 100) << "%)" << std::endl;
+    }
+
+    // ✅ ДОБАВЛЕНО: показываем сохранённые параметры
+    if (!info.parameters.empty()) {
+        std::cout << std::endl;
+        std::cout << "Strategy Parameters (" << info.parameters.size() << "):" << std::endl;
+        for (const auto& [key, value] : info.parameters) {
+            std::cout << "  " << std::left << std::setw(25) << key
+                      << " = " << value << std::endl;
+        }
+    }
+
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
     return {};
 }
 
@@ -805,6 +845,58 @@ std::expected<void, std::string> CommandExecutor::executePortfolioRemoveInstrume
 
     return savePortfolioToFile(portfolio);
 }
+
+std::expected<void, std::string> CommandExecutor::executePortfolioSetParam(
+    const ParsedCommand& cmd)
+{
+    // Получаем имя портфеля
+    auto nameResult = getRequiredOption<std::string>(cmd, "portfolio");
+    if (!nameResult) {
+        return std::unexpected(nameResult.error());
+    }
+    std::string portfolioName = nameResult.value();
+
+    // Проверяем наличие параметров
+    if (!cmd.options.count("param")) {
+        return std::unexpected("No parameters specified. Use -P key:value");
+    }
+
+    // Загружаем портфель
+    auto portfolioResult = portfolioManager_->getPortfolio(portfolioName);
+    if (!portfolioResult) {
+        return std::unexpected(portfolioResult.error());
+    }
+
+    auto info = portfolioResult.value();
+
+    // Парсим и устанавливаем параметры
+    auto paramStrings = cmd.options.at("param").as<std::vector<std::string>>();
+
+    std::cout << "Setting parameters for portfolio '" << info.name << "':" << std::endl;
+
+    for (const auto& paramStr : paramStrings) {
+        auto parseResult = parseParameter(paramStr);
+        if (!parseResult) {
+            return std::unexpected(parseResult.error());
+        }
+
+        const auto& [key, value] = *parseResult;
+        info.parameters[key] = value;
+        std::cout << "  " << key << " = " << value << std::endl;
+    }
+
+    // Сохраняем обновлённый портфель
+    auto updateResult = portfolioManager_->updatePortfolio(info);
+    if (!updateResult) {
+        return std::unexpected(updateResult.error());
+    }
+
+    std::cout << "✓ Parameters saved successfully" << std::endl;
+    std::cout << std::endl;
+
+    return {};
+}
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Strategy Management

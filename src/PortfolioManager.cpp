@@ -50,6 +50,10 @@ std::expected<PortfolioInfo, std::string> PortfolioManager::deserializePortfolio
             info.weights = j.at("weights").get<std::map<std::string, double>>();
         }
 
+        if (j.contains("parameters")) {
+            info.parameters = j.at("parameters").get<std::map<std::string, std::string>>();
+        }
+
         return info;
     } catch (const std::exception& e) {
         return std::unexpected(std::string("Deserialization error: ") + e.what());
@@ -67,6 +71,7 @@ json PortfolioManager::serializePortfolio(const PortfolioInfo& info) const
     j["createdDate"] = info.createdDate;
     j["modifiedDate"] = info.modifiedDate;
 
+    j["parameters"] = info.parameters;
     return j;
 }
 

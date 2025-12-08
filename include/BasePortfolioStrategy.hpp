@@ -9,6 +9,7 @@
 #include <map>
 #include <vector>
 #include <memory>
+#include <iostream>
 
 namespace portfolio {
 
@@ -70,30 +71,27 @@ protected:
         const TimePoint& startDate,
         const TimePoint& endDate)
     {
-        if (!database_) {
-            return std::unexpected("Database not set");
-        }
-
-        // Получаем параметр календаря
         std::string referenceInstrument = params.getParameter("calendar", "IMOEX");
 
         auto calendarResult = TradingCalendar::create(
-            database_,
-            params.instrumentIds,
-            startDate,
-            endDate,
-            referenceInstrument);
+            database_, params.instrumentIds, startDate, endDate, referenceInstrument);
 
         if (!calendarResult) {
-            return std::unexpected(
-                "Failed to create trading calendar: " + calendarResult.error());
+            return std::unexpected("Calendar initialization failed: " + calendarResult.error());
         }
+        calendar_ = std::move(*calendarResult);
 
-        calendar_ = std::make_unique<TradingCalendar>(
-            std::move(*calendarResult));
+        // Улучшенный вывод
+        std::cout << "✓ Trading calendar initialized" << std::endl;
+        if (calendar_->usedAlternativeReference()) {
+            std::cout << "  Note: Using '" << calendar_->getReferenceInstrument()
+            << "' as reference ('" << referenceInstrument
+            << "' was not available)" << std::endl;
+        }
 
         return {};
     }
+
 
     // ═════════════════════════════════════════════════════════════════════════
     // Инициализация корректировки инфляции

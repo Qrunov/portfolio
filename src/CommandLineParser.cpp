@@ -144,6 +144,7 @@ po::options_description CommandLineParser::createPortfolioOptions() {
         ("weight,w", po::value<double>()->default_value(0.5), "Instrument weight")
         ("detail", po::bool_switch()->default_value(false), "Show detailed information")
         ("confirm", po::bool_switch()->default_value(false), "Confirm deletion")
+        ("param,P", po::value<std::vector<std::string>>()->multitoken(), "Strategy parameter (key:value)")
         ("help,h", "Show help message");
     return desc;
 }

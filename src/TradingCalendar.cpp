@@ -170,7 +170,6 @@ std::expected<DateAdjustment, std::string> TradingCalendar::adjustDateForOperati
     adjustment.adjustedDate = requestedDate;
     adjustment.operation = operation;
 
-    // Проверяем является ли день торговым
     if (!isTradingDay(requestedDate)) {
         adjustment.reason = "Requested date is not a trading day";
 
@@ -182,7 +181,7 @@ std::expected<DateAdjustment, std::string> TradingCalendar::adjustDateForOperati
             adjustment.adjustedDate = *nextTrading;
         } else {
             return std::unexpected(
-                "No trading days after requested date");
+                "No trading days after requested date (period ended)");  // ← Улучшено
         }
     }
 

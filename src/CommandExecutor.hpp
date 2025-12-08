@@ -89,6 +89,32 @@ private:
     std::expected<void, std::string> executeStrategyListUpdated(const ParsedCommand& cmd);
 
 
+    // Метод для валидации известных параметров (опционально)
+    std::expected<void, std::string> validateStrategyParameters(
+        const std::map<std::string, std::string>& parameters) const
+    {
+        // Список известных параметров (можно расширять)
+        static const std::set<std::string> knownParams = {
+            "calendar",
+            "inflation",
+            // Будущие параметры:
+            // "rebalance",
+            // "risk_model",
+            // "stop_loss",
+            // "take_profit"
+        };
+
+        // Проверяем неизвестные параметры (warning, не ошибка)
+        for (const auto& [key, value] : parameters) {
+            if (knownParams.find(key) == knownParams.end()) {
+                std::cout << "⚠ Warning: Unknown parameter '" << key
+                          << "' (this may be strategy-specific)" << std::endl;
+            }
+        }
+
+        return {};
+    }
+
 
 };
 

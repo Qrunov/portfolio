@@ -24,7 +24,15 @@ BuyHoldStrategy::backtest(
                                    endDate - startDate).count() / 24 << " days" << std::endl;
     std::cout << "Initial Capital: $" << initialCapital << std::endl;
     std::cout << "Instruments: " << params.instrumentIds.size() << std::endl;
-    std::cout << "Reference Instrument: " << params.referenceInstrument << std::endl;
+
+    // ✅ ИСПРАВЛЕНО: вывод параметров из словаря
+    if (params.hasParameter("calendar")) {
+        std::cout << "Reference Instrument: " << params.getParameter("calendar") << std::endl;
+    }
+    if (params.hasParameter("inflation")) {
+        std::cout << "Inflation Instrument: " << params.getParameter("inflation") << std::endl;
+    }
+
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
     // ════════════════════════════════════════════════════════════════════════
@@ -45,11 +53,30 @@ BuyHoldStrategy::backtest(
     // Инициализация торгового календаря
     // ════════════════════════════════════════════════════════════════════════
 
+    // ✅ ИСПРАВЛЕНО: убрали 4-й аргумент "IMOEX" (берётся из params)
     auto calendarResult = initializeTradingCalendar(params, startDate, endDate);
     if (!calendarResult) {
         return std::unexpected("Calendar initialization failed: " +
                                calendarResult.error());
     }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Инициализация корректировки инфляции (опционально)
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::unique_ptr<InflationAdjuster> inflationAdjuster;
+
+    // ✅ ДОБАВЛЕНО: инициализация InflationAdjuster
+    auto inflationResult = initializeInflationAdjuster(params, startDate, endDate);
+    if (inflationResult) {
+        inflationAdjuster = std::move(*inflationResult);
+        std::cout << "✓ Inflation adjuster initialized" << std::endl;
+    } else {
+        std::cout << "⚠ Inflation data not available: "
+                  << inflationResult.error() << std::endl;
+        std::cout << "  Continuing without inflation adjustment" << std::endl;
+    }
+    std::cout << std::endl;
 
     // ════════════════════════════════════════════════════════════════════════
     // Загрузка данных
@@ -232,6 +259,19 @@ BuyHoldStrategy::backtest(
         double portfolioValue = cashBalance + calculatePortfolioValue(holdings, day);
         dailyValues.push_back(portfolioValue);
     }
+    std::cout << "\n=== DEBUG: Daily Values ===" << std::endl;
+    std::cout << "Days: " << dailyValues.size() << std::endl;
+    if (!dailyValues.empty()) {
+        std::cout << "First: $" << dailyValues.front() << std::endl;
+        std::cout << "Last:  $" << dailyValues.back() << std::endl;
+
+        if (dailyValues.size() <= 10) {
+            for (std::size_t i = 0; i < dailyValues.size(); ++i) {
+                std::cout << "  Day " << i << ": $" << dailyValues[i] << std::endl;
+            }
+        }
+    }
+    std::cout << "========================\n" << std::endl;
 
     // ════════════════════════════════════════════════════════════════════════
     // Финализация и расчет метрик
@@ -269,25 +309,29 @@ BuyHoldStrategy::backtest(
             result.dividendYield = (totalDividendsReceived / initialCapital / yearsElapsed) * 100.0;
         }
     }
-
-    // Финализируем налоги
-    finalizeTaxes(result, initialCapital);
-
     // ════════════════════════════════════════════════════════════════════════
     // Волатильность
     // ════════════════════════════════════════════════════════════════════════
 
+    std::cout << "\n=== DEBUG: Volatility Calculation ===" << std::endl;
+    std::cout << "dailyValues.size() = " << dailyValues.size() << std::endl;
+
     if (dailyValues.size() > 1) {
+        std::cout << "✓ Entering volatility calculation block" << std::endl;
+
         std::vector<double> dailyReturns;
         dailyReturns.reserve(dailyValues.size() - 1);
 
         for (std::size_t i = 1; i < dailyValues.size(); ++i) {
             double ret = (dailyValues[i] - dailyValues[i-1]) / dailyValues[i-1];
             dailyReturns.push_back(ret);
+            std::cout << "  Return[" << i << "]: " << (ret * 100.0) << "%" << std::endl;
         }
 
         double meanReturn = std::accumulate(
                                 dailyReturns.begin(), dailyReturns.end(), 0.0) / dailyReturns.size();
+
+        std::cout << "Mean return: " << (meanReturn * 100.0) << "%" << std::endl;
 
         double variance = 0.0;
         for (double ret : dailyReturns) {
@@ -295,46 +339,45 @@ BuyHoldStrategy::backtest(
         }
         variance /= dailyReturns.size();
 
+        std::cout << "Variance: " << variance << std::endl;
+        std::cout << "Std dev (daily): " << std::sqrt(variance) << std::endl;
+
         result.volatility = std::sqrt(variance) * std::sqrt(252.0) * 100.0;
+
+        std::cout << "Volatility (annualized): " << result.volatility << "%" << std::endl;
+    } else {
+        std::cout << "⚠ NOT entering volatility calculation (size <= 1)" << std::endl;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Maximum Drawdown
-    // ════════════════════════════════════════════════════════════════════════
+    std::cout << "Final result.volatility: " << result.volatility << "%" << std::endl;
+    std::cout << "=================================\n" << std::endl;
 
-    double maxValue = dailyValues[0];
-    double maxDrawdown = 0.0;
+    // Финализируем налоги
+    finalizeTaxes(result, initialCapital);
 
-    for (double value : dailyValues) {
-        if (value > maxValue) {
-            maxValue = value;
+    // ✅ ИСПРАВЛЕНО: передаём startDate и endDate
+    if (inflationAdjuster) {
+        auto cumulativeInflation = inflationAdjuster->getCumulativeInflation(
+            startDate, endDate);
+
+        result.hasInflationData = true;
+        result.inflationRate = cumulativeInflation * 100.0;
+
+        // Реальная доходность: (1 + nominal) / (1 + inflation) - 1
+        double nominalFactor = 1.0 + (result.totalReturn / 100.0);
+        double inflationFactor = 1.0 + cumulativeInflation;
+        double realFactor = nominalFactor / inflationFactor;
+        result.realReturn = (realFactor - 1.0) * 100.0;
+
+        // Реальная годовая доходность
+        double yearsElapsed = result.tradingDays / 365.25;
+        if (yearsElapsed > 0) {
+            result.realAnnualizedReturn = (std::pow(realFactor, 1.0 / yearsElapsed) - 1.0) * 100.0;
         }
-        double drawdown = (maxValue - value) / maxValue;
-        if (drawdown > maxDrawdown) {
-            maxDrawdown = drawdown;
-        }
-    }
-    result.maxDrawdown = maxDrawdown * 100.0;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Sharpe Ratio
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (result.volatility > 0) {
-        result.sharpeRatio = (result.annualizedReturn - 2.0) / result.volatility;
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Вывод результатов
-    // ════════════════════════════════════════════════════════════════════════
-
-    std::cout << "\n✓ Backtest completed" << std::endl;
-    std::cout << "  Final Value: $" << result.finalValue << std::endl;
-    std::cout << "  Total Return: " << result.totalReturn << "%" << std::endl;
-
-    if (taxCalculator_) {
-        std::cout << "  After-Tax Return: " << result.afterTaxReturn << "%" << std::endl;
-        std::cout << "  Taxes Paid: $" << result.totalTaxesPaid << std::endl;
+        std::cout << "\n✓ Inflation adjustment applied" << std::endl;
+        std::cout << "  Cumulative inflation: " << result.inflationRate << "%" << std::endl;
+        std::cout << "  Real return: " << result.realReturn << "%" << std::endl;
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -410,6 +453,28 @@ BuyHoldStrategy::backtest(
         std::cout << "  Trading days: " << calendar_->getTradingDaysCount() << std::endl;
     }
 
+    if (dailyValues.size() < 2) {
+        std::cout << "⚠ WARNING: Not enough data for drawdown calculation" << std::endl;
+        result.maxDrawdown = 0.0;
+    } else {
+        double maxValue = dailyValues[0];
+        double maxDrawdown = 0.0;
+
+        for (double value : dailyValues) {
+            if (value > maxValue) {
+                maxValue = value;
+            }
+            double drawdown = (maxValue - value) / maxValue;
+            if (drawdown > maxDrawdown) {
+                maxDrawdown = drawdown;
+            }
+        }
+        result.maxDrawdown = maxDrawdown * 100.0;
+
+        std::cout << "=== DEBUG: Drawdown ===" << std::endl;
+        std::cout << "Max value: $" << maxValue << std::endl;
+        std::cout << "Max drawdown: " << result.maxDrawdown << "%" << std::endl;
+    }
     std::cout << std::endl;
 
     return result;

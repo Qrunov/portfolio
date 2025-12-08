@@ -148,10 +148,6 @@ po::options_description CommandLineParser::createPortfolioOptions() {
     return desc;
 }
 
-// ============================================================================
-// ЗАМЕНИТЬ ЭТОТ МЕТОД
-// ============================================================================
-
 po::options_description CommandLineParser::createStrategyOptions() {
     po::options_description desc("Strategy options");
     desc.add_options()
@@ -163,6 +159,14 @@ po::options_description CommandLineParser::createStrategyOptions() {
         ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
         ("db-path", po::value<std::string>(), "Database path")
 
+        // ✅ ИЗМЕНЕНО: универсальная опция для параметров стратегии
+        ("param,P", po::value<std::vector<std::string>>()->multitoken(),
+         "Strategy parameters in format key:value (can be specified multiple times)\n"
+         "Available parameters:\n"
+         "  calendar:INSTRUMENT  - Reference instrument for trading calendar (default: IMOEX)\n"
+         "  inflation:INSTRUMENT - Inflation instrument (default: INF)\n"
+         "Example: -P calendar:RTSI -P inflation:CPI")
+
         // Налоговые опции
         ("enable-tax", po::bool_switch(), "Включить расчет НДФЛ")
         ("ndfl-rate", po::value<double>(), "Ставка НДФЛ (по умолчанию 0.13)")
@@ -173,7 +177,6 @@ po::options_description CommandLineParser::createStrategyOptions() {
         ("help,h", "Show help message");
     return desc;
 }
-
 po::options_description CommandLineParser::createSourceOptions() {
     po::options_description desc("Source options");
     desc.add_options()

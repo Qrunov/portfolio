@@ -16,7 +16,7 @@ protected:
         strategy = std::make_unique<BuyHoldStrategy>();
         database = std::make_shared<InMemoryDatabase>();
 
-        // ✅ Устанавливаем database через новый API
+        // ✅ ИСПРАВЛЕНО: передаём shared_ptr без .get()
         strategy->setDatabase(database);
 
         startDate = std::chrono::system_clock::now();
@@ -24,7 +24,7 @@ protected:
     }
 
     std::unique_ptr<BuyHoldStrategy> strategy;
-    std::shared_ptr<InMemoryDatabase> database;
+    std::shared_ptr<InMemoryDatabase> database;  // Тест владеет через shared_ptr
     TimePoint startDate;
     TimePoint endDate;
 
@@ -69,6 +69,9 @@ protected:
             params.weights[id] = weight;
         }
 
+        // ✅ Используем новый API параметров
+        params.setParameter("calendar", "IMOEX");
+
         return params;
     }
 };
@@ -86,7 +89,6 @@ TEST_F(BuyHoldDividendTest, BacktestWithSingleDividend) {
     // Дивиденд 10₽ на день 50
     addDividend("GAZP", 50, 10.0);
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
@@ -110,7 +112,6 @@ TEST_F(BuyHoldDividendTest, BacktestWithMultipleDividends) {
     addDividend("SBER", 75, 10.0);
     addDividend("SBER", 90, 10.0);
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
@@ -129,7 +130,6 @@ TEST_F(BuyHoldDividendTest, BacktestWithDividendReinvestment) {
     // Дивиденд 10₽ на день 50
     addDividend("GAZP", 50, 10.0);
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
@@ -148,7 +148,6 @@ TEST_F(BuyHoldDividendTest, BacktestNoDividendsProvided) {
 
     // Не добавляем дивиденды
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());

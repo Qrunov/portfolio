@@ -16,7 +16,7 @@ protected:
         strategy = std::make_unique<BuyHoldStrategy>();
         database = std::make_shared<InMemoryDatabase>();
 
-        // ✅ Устанавливаем database через новый API
+        // ✅ Передаём shared_ptr напрямую (без .get())
         strategy->setDatabase(database);
 
         // Создаем временные точки
@@ -59,6 +59,9 @@ protected:
             params.weights[id] = weight;
         }
 
+        // ✅ Используем новый API параметров
+        params.setParameter("calendar", "IMOEX");
+
         return params;
     }
 };
@@ -81,7 +84,6 @@ TEST_F(BuyHoldStrategyTest, BacktestWithNegativeCapital) {
     auto params = createParams({"GAZP"});
     addInstrumentData("GAZP", "Gazprom", {100, 101, 102});
 
-    // ✅ Новый API: только 4 параметра (database уже установлен)
     auto result = strategy->backtest(params, startDate, endDate, -1000);
 
     EXPECT_FALSE(result.has_value());
@@ -92,7 +94,7 @@ TEST_F(BuyHoldStrategyTest, BacktestWithInvalidDates) {
     auto params = createParams({"GAZP"});
     addInstrumentData("GAZP", "Gazprom", {100, 101, 102});
 
-    // ✅ endDate < startDate
+    // endDate < startDate
     auto result = strategy->backtest(params, endDate, startDate, 100000);
 
     EXPECT_FALSE(result.has_value());
@@ -109,7 +111,6 @@ TEST_F(BuyHoldStrategyTest, SimpleBacktestWithGrowingPrice) {
     std::vector<double> prices = {100, 101, 102, 103, 104, 105, 106, 107, 108, 109};
     addInstrumentData("GAZP", "Gazprom", prices);
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
@@ -120,7 +121,26 @@ TEST_F(BuyHoldStrategyTest, SimpleBacktestWithGrowingPrice) {
     EXPECT_GT(metrics.annualizedReturn, 0);
     EXPECT_LE(metrics.maxDrawdown, 0);
 }
+TEST_F(BuyHoldStrategyTest, BacktestWithVolatility) {
+    auto params = createParams({"SBER"});
 
+    // Цены с вариацией (не линейные): создают волатильность
+    std::vector<double> prices = {100, 102, 98, 101, 97, 103, 95, 99, 96, 100};
+    addInstrumentData("SBER", "Sberbank", prices);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    auto metrics = *result;
+
+    // При нелинейном движении волатильность должна быть > 0
+    EXPECT_GT(metrics.volatility, 0) << "Volatility should be positive for non-linear prices";
+
+    // Можем рассчитать примерное значение
+    // Дневные доходности: +2%, -3.92%, +3.06%, -3.96%, +6.19%, -7.77%, +4.21%, -3.03%, +4.17%
+    // Стандартное отклонение ≈ 4.5%, годовое ≈ 71%
+    EXPECT_GT(metrics.volatility, 50) << "Expected annualized volatility > 50%";
+}
 TEST_F(BuyHoldStrategyTest, SimpleBacktestWithDecreasingPrice) {
     auto params = createParams({"SBER"});
 
@@ -128,16 +148,24 @@ TEST_F(BuyHoldStrategyTest, SimpleBacktestWithDecreasingPrice) {
     std::vector<double> prices = {100, 99, 98, 97, 96, 95, 94, 93, 92, 91};
     addInstrumentData("SBER", "Sberbank", prices);
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.has_value()) << "Backtest should succeed";
     auto metrics = *result;
 
-    EXPECT_LT(metrics.totalReturn, 0);
-    EXPECT_LT(metrics.finalValue, 100000);
-    EXPECT_LT(metrics.annualizedReturn, 0);
-    EXPECT_GT(metrics.maxDrawdown, 0);
+    // Проверяем доходность
+    EXPECT_LT(metrics.totalReturn, 0) << "Total return should be negative";
+    EXPECT_NEAR(metrics.totalReturn, -9.0, 1.0) << "Expected ~-9% return";
+
+    // Проверяем финальную стоимость
+    EXPECT_LT(metrics.finalValue, 100000) << "Final value should be less than initial";
+    EXPECT_NEAR(metrics.finalValue, 91000, 1000) << "Expected ~$91,000 final value";
+
+    // Проверяем просадку
+    EXPECT_NEAR(metrics.maxDrawdown, 9.0, 1.0) << "Expected ~9% drawdown";
+
+    // ✅ ИСПРАВЛЕНО: волатильность >= 0 (может быть 0 при линейном движении)
+    EXPECT_GE(metrics.volatility, 0) << "Volatility should be non-negative";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -153,7 +181,6 @@ TEST_F(BuyHoldStrategyTest, BacktestWithTwoStocks) {
     addInstrumentData("GAZP", "Gazprom", gazpPrices);
     addInstrumentData("SBER", "Sberbank", sberPrices);
 
-    // ✅ Новый API
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());

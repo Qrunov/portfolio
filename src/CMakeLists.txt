@@ -9,6 +9,7 @@ set(PORTFOLIO_CORE_SOURCES
     PortfolioManager.cpp
     TaxCalculator.cpp
     TradingCalendar.cpp
+    InflationAdjuster.cpp  # Добавить
     #    InMemoryDatabase.cpp
 )
 

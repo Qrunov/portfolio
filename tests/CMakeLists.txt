@@ -64,3 +64,15 @@ portfolio_add_test(
 )
 
 message(STATUS "  ✓ Added test: trading_calendar")
+
+# ----------------------------------------------------------------------------
+# Inflation Adjuster Tests
+# ----------------------------------------------------------------------------
+
+portfolio_add_test(
+    NAME inflation_adjuster
+    SOURCES test_inflation_adjuster.cpp
+    LIBRARIES inmemory_db_impl
+)
+
+message(STATUS "  ✓ Added test: inflation_adjuster")

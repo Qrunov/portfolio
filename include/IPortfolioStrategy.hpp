@@ -3,7 +3,7 @@
 
 #include "IPortfolioDatabase.hpp"
 #include "TaxCalculator.hpp"
-#include "TradingCalendar.hpp"  // ← ДОБАВИТЬ
+#include "TradingCalendar.hpp"
 #include <string>
 #include <memory>
 #include <expected>
@@ -48,7 +48,15 @@ public:
         TaxSummary taxSummary;
 
         // Корректировки дат
-        std::vector<DateAdjustment> dateAdjustments;  // ← ДОБАВИТЬ
+        std::vector<DateAdjustment> dateAdjustments;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Инфляция (добавлено)
+        // ═══════════════════════════════════════════════════════════════════
+        bool hasInflationData = false;
+        double inflationRate = 0.0;              // Совокупная инфляция за период (%)
+        double realReturn = 0.0;                 // Реальная доходность (%)
+        double realAnnualizedReturn = 0.0;       // Реальная годовая доходность (%)
     };
 
     struct PortfolioParams {
@@ -57,8 +65,54 @@ public:
         double initialCapital = 0.0;
         bool reinvestDividends = true;
 
-        // Эталонный инструмент для торгового календаря
-        std::string referenceInstrument = "IMOEX";  // ← ДОБАВИТЬ
+        // ═══════════════════════════════════════════════════════════════════
+        // Словарь параметров стратегии
+        // ═══════════════════════════════════════════════════════════════════
+        std::map<std::string, std::string> parameters;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Вспомогательные методы для работы с параметрами
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Получить параметр с значением по умолчанию
+        std::string getParameter(
+            std::string_view key,
+            std::string_view defaultValue = "") const noexcept
+        {
+            auto it = parameters.find(std::string(key));
+            if (it != parameters.end()) {
+                return it->second;
+            }
+            return std::string(defaultValue);
+        }
+
+        // Установить параметр
+        void setParameter(std::string_view key, std::string_view value) {
+            parameters[std::string(key)] = std::string(value);
+        }
+
+        // Проверить наличие параметра
+        bool hasParameter(std::string_view key) const noexcept {
+            return parameters.find(std::string(key)) != parameters.end();
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Стандартные параметры (для удобства документации)
+        // ═══════════════════════════════════════════════════════════════════
+        //
+        // Поддерживаемые ключи:
+        //   "calendar"   - референсный инструмент для торгового календаря
+        //                  (default: "IMOEX")
+        //   "inflation"  - инструмент для корректировки на инфляцию
+        //                  (default: "INF")
+        //
+        // Примеры использования:
+        //   params.setParameter("calendar", "RTSI");
+        //   params.setParameter("inflation", "CPI");
+        //
+        //   std::string ref = params.getParameter("calendar", "IMOEX");
+        //   if (params.hasParameter("inflation")) { ... }
+        // ═══════════════════════════════════════════════════════════════════
     };
 
     virtual std::expected<BacktestResult, std::string> backtest(

@@ -4,7 +4,8 @@
 #include "IPortfolioStrategy.hpp"
 #include "IPortfolioDatabase.hpp"
 #include "TaxCalculator.hpp"
-#include "TradingCalendar.hpp"  // ← ДОБАВИТЬ
+#include "TradingCalendar.hpp"
+#include "InflationAdjuster.hpp"  // ✅ ДОБАВИТЬ
 #include <map>
 #include <vector>
 #include <memory>
@@ -31,7 +32,7 @@ protected:
 
     std::shared_ptr<IPortfolioDatabase> database_;
     std::shared_ptr<TaxCalculator> taxCalculator_;
-    std::unique_ptr<TradingCalendar> calendar_;  // ← ДОБАВИТЬ
+    std::unique_ptr<TradingCalendar> calendar_;
 
     // Хранилище налоговых лотов
     std::map<std::string, std::vector<TaxLot>> instrumentLots_;
@@ -49,12 +50,15 @@ protected:
             return std::unexpected("Database not set");
         }
 
+        // Получаем параметр календаря
+        std::string referenceInstrument = params.getParameter("calendar", "IMOEX");
+
         auto calendarResult = TradingCalendar::create(
             database_,
             params.instrumentIds,
             startDate,
             endDate,
-            params.referenceInstrument);
+            referenceInstrument);
 
         if (!calendarResult) {
             return std::unexpected(
@@ -68,6 +72,37 @@ protected:
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // Инициализация корректировки инфляции
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::expected<std::unique_ptr<InflationAdjuster>, std::string>
+    initializeInflationAdjuster(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate)
+    {
+        if (!database_) {
+            return std::unexpected("Database not set");
+        }
+
+        // Получаем параметр инфляции
+        std::string inflationInstrument = params.getParameter("inflation", "INF");
+
+        auto adjusterResult = InflationAdjuster::create(
+            database_,
+            startDate,
+            endDate,
+            inflationInstrument);
+
+        if (!adjusterResult) {
+            return std::unexpected(
+                "Failed to create inflation adjuster: " + adjusterResult.error());
+        }
+
+        return std::make_unique<InflationAdjuster>(std::move(*adjusterResult));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // Корректировка дат операций
     // ═════════════════════════════════════════════════════════════════════════
 
@@ -76,7 +111,7 @@ protected:
         const TimePoint& requestedDate)
     {
         if (!calendar_) {
-            return requestedDate;  // Без календаря не корректируем
+            return requestedDate;
         }
 
         auto adjustmentResult = calendar_->adjustDateForOperation(
@@ -94,7 +129,7 @@ protected:
         const TimePoint& requestedDate)
     {
         if (!calendar_) {
-            return requestedDate;  // Без календаря не корректируем
+            return requestedDate;
         }
 
         auto adjustmentResult = calendar_->adjustDateForOperation(
@@ -191,6 +226,8 @@ protected:
         return afterTax;
     }
 
+
+
     void finalizeTaxes(BacktestResult& result, double initialCapital) const
     {
         if (!taxCalculator_) {
@@ -209,7 +246,6 @@ protected:
             result.taxEfficiency = (result.afterTaxReturn / result.totalReturn) * 100.0;
         }
 
-        // Добавляем лог корректировок дат
         if (calendar_) {
             result.dateAdjustments = calendar_->getAdjustmentLog();
         }

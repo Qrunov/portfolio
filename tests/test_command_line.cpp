@@ -124,7 +124,8 @@ TEST_F(CommandExecutorTest, ExecuteSourceListEmpty) {
     auto result = executor->execute(cmd);
 
     // Может быть ошибка если database не инициализирован
-    if (!result) {
+    //TODO: здесь всегда ошибка? почему может быть?
+        if (!result) {
         EXPECT_EQ(result.error(), "Database not initialized");
     }
 }

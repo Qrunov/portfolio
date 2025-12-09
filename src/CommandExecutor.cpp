@@ -527,23 +527,95 @@ std::expected<void, std::string> CommandExecutor::executeInstrument(const Parsed
     }
 }
 
+
 std::expected<void, std::string> CommandExecutor::executeInstrumentList(
-    const ParsedCommand& /*cmd*/)
+    const ParsedCommand& cmd)
 {
+    // ════════════════════════════════════════════════════════════════════════
+    // Инициализация базы данных из опций командной строки
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string dbType = "InMemory";
+    std::string dbPath;
+
+    if (cmd.options.count("db")) {
+        dbType = cmd.options.at("db").as<std::string>();
+    }
+
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
+    }
+
+    // Инициализируем базу данных если необходимо
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение фильтров (опционально)
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string typeFilter;
+    std::string sourceFilter;
+
+    if (cmd.options.count("type")) {
+        typeFilter = cmd.options.at("type").as<std::string>();
+    }
+
+    if (cmd.options.count("source")) {
+        sourceFilter = cmd.options.at("source").as<std::string>();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение списка инструментов
+    // ════════════════════════════════════════════════════════════════════════
+
     if (!database_) {
         return std::unexpected("Database not initialized");
     }
 
-    auto result = database_->listInstruments();
+    auto result = database_->listInstruments(typeFilter, sourceFilter);
     if (!result) {
         return std::unexpected(result.error());
     }
 
     const auto& instruments = result.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод результатов
+    // ════════════════════════════════════════════════════════════════════════
+
     if (instruments.empty()) {
-        std::cout << "No instruments found." << std::endl;
+        std::cout << "No instruments found.";
+
+        if (!typeFilter.empty() || !sourceFilter.empty()) {
+            std::cout << " (with filters:";
+            if (!typeFilter.empty()) {
+                std::cout << " type=" << typeFilter;
+            }
+            if (!sourceFilter.empty()) {
+                std::cout << " source=" << sourceFilter;
+            }
+            std::cout << ")";
+        }
+
+        std::cout << std::endl;
     } else {
-        std::cout << "Instruments (" << instruments.size() << "):" << std::endl;
+        std::cout << "Instruments (" << instruments.size() << ")";
+
+        if (!typeFilter.empty() || !sourceFilter.empty()) {
+            std::cout << " with filters:";
+            if (!typeFilter.empty()) {
+                std::cout << " type=" << typeFilter;
+            }
+            if (!sourceFilter.empty()) {
+                std::cout << " source=" << sourceFilter;
+            }
+        }
+
+        std::cout << ":" << std::endl;
+
         for (const auto& id : instruments) {
             std::cout << "  - " << id << std::endl;
         }

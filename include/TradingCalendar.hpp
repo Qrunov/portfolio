@@ -117,6 +117,9 @@ public:
     TimePoint getStartDate() const noexcept { return startDate_; }
     TimePoint getEndDate() const noexcept { return endDate_; }
 
+    const std::vector<TimePoint>& getSortedTradingDays() const noexcept {
+        return sortedTradingDays_;
+    }
 
 private:
     // Вспомогательные методы
@@ -142,6 +145,7 @@ private:
     bool usedAlternative_;
     TimePoint startDate_;
     TimePoint endDate_;
+    std::vector<TimePoint> sortedTradingDays_;
 
     // Логирование
     std::vector<DateAdjustment> adjustmentLog_;

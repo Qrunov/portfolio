@@ -1,70 +1,67 @@
-// plugins/strategy/buyhold/BuyHoldStrategy.hpp
 #pragma once
 
-#include "../../../include/BasePortfolioStrategy.hpp"
+#include "BasePortfolioStrategy.hpp"
 #include <map>
-#include <vector>
 
 namespace portfolio {
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Структура для хранения дивидендов
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct DividendPayment {
+    TimePoint date;
+    double amount;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BuyHold Strategy
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class BuyHoldStrategy : public BasePortfolioStrategy {
 public:
     BuyHoldStrategy() = default;
     ~BuyHoldStrategy() override = default;
 
-    std::string_view getName() const noexcept override { return "BuyHold"; }
-    std::string_view getVersion() const noexcept override { return "1.0.2"; }
-    std::string_view getDescription() const noexcept override {
-        return "Buy and hold strategy with tax support";
+    std::string_view getName() const noexcept override {
+        return "BuyHold";
     }
 
-    BuyHoldStrategy(const BuyHoldStrategy&) = delete;
-    BuyHoldStrategy& operator=(const BuyHoldStrategy&) = delete;
+    std::string_view getDescription() const noexcept override {
+        return "Buy and Hold strategy - purchases instruments at start and holds until end";
+    }
 
-    // Главный метод - реализуем backtest
+    // ✅ ДОБАВЛЕНО: метод getVersion()
+    std::string_view getVersion() const noexcept override {
+        return "1.0.2";
+    }
+
     std::expected<BacktestResult, std::string> backtest(
         const PortfolioParams& params,
         const TimePoint& startDate,
         const TimePoint& endDate,
         double initialCapital) override;
 
-
-    // ════════════════════════════════════════════════════════════════════
-    // Параметры: используем базовые + можем добавить свои
-    // ════════════════════════════════════════════════════════════════════
-
     std::map<std::string, std::string> getDefaultParameters() const override {
-        // Получаем базовые параметры
-        auto defaults = BasePortfolioStrategy::getDefaultParameters();
-
-        // ✅ Можем добавить специфичные для BuyHold параметры
-        // defaults["rebalance_period"] = "0";  // 0 = никогда не ребалансировать
-        // defaults["min_position_size"] = "1000";  // минимальный размер позиции
-
-        return defaults;
+        return BasePortfolioStrategy::getDefaultParameters();
     }
 
-
-
 private:
-    // Вспомогательные методы
     std::expected<void, std::string> loadPriceData(
-        const PortfolioParams& params,
+        const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
-        const TimePoint& endDate);
+        const TimePoint& endDate,
+        std::map<std::string, std::map<TimePoint, double>>& priceData);
 
     std::expected<void, std::string> loadDividendData(
-        const PortfolioParams& params,
+        const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
-        const TimePoint& endDate);
+        const TimePoint& endDate,
+        std::map<std::string, std::vector<DividendPayment>>& dividendData);
 
     double calculatePortfolioValue(
         const std::map<std::string, double>& holdings,
-        std::size_t dayIndex) const;
-
-    // Хранилище данных
-    std::map<std::string, std::vector<std::pair<TimePoint, double>>> priceData_;
-    std::map<std::string, std::vector<std::pair<TimePoint, double>>> dividendData_;
+        std::size_t day) const;
 };
 
 } // namespace portfolio

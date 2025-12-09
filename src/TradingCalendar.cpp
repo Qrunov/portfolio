@@ -173,6 +173,10 @@ TradingCalendar::create(
         endDate
         );
 
+    calendar->sortedTradingDays_.assign(
+        calendar->tradingDays_.begin(),
+        calendar->tradingDays_.end()
+        );
     std::cout << "Calendar created successfully:" << std::endl;
     std::cout << "  Trading days: " << calendar->getTradingDaysCount() << std::endl;
 

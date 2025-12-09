@@ -5,7 +5,8 @@
 #include "IPortfolioDatabase.hpp"
 #include "TaxCalculator.hpp"
 #include "TradingCalendar.hpp"
-#include "InflationAdjuster.hpp"  // ✅ ДОБАВИТЬ
+#include "InflationAdjuster.hpp"
+#include "RiskFreeRateCalculator.hpp"
 #include <map>
 #include <vector>
 #include <memory>
@@ -57,6 +58,11 @@ protected:
         defaults["long_term_exemption"] = "true";
         defaults["lot_method"] = "FIFO";
         defaults["import_losses"] = "0";
+
+        defaults["risk_free_rate"] = "7.0";           // Процент годовых
+        defaults["risk_free_instrument"] = "";        // Инструмент (например, SBMM)
+
+
 
         return defaults;
     }
@@ -272,6 +278,57 @@ protected:
             result.dateAdjustments = calendar_->getAdjustmentLog();
         }
     }
+
+    std::expected<RiskFreeRateCalculator, std::string>
+    initializeRiskFreeRate(
+        const PortfolioParams& params,
+        const std::vector<TimePoint>& tradingDates)  // ✅ Принимаем торговые даты
+    {
+        std::string instrumentId = params.getParameter("risk_free_instrument", "");
+
+        // Случай 1: Используем инструмент
+        if (!instrumentId.empty()) {
+            std::cout << "\n" << std::string(70, '=') << std::endl;
+            std::cout << "Risk-Free Rate Initialization (from instrument)" << std::endl;
+            std::cout << std::string(70, '=') << std::endl;
+            std::cout << "Instrument: " << instrumentId << std::endl;
+
+            auto calcResult = RiskFreeRateCalculator::fromInstrument(
+                database_, instrumentId, tradingDates);
+
+            if (!calcResult) {
+                std::cout << "⚠ Failed to load risk-free instrument: "
+                          << calcResult.error() << std::endl;
+                std::cout << "  Falling back to fixed rate" << std::endl;
+
+                // Fallback на фиксированную ставку
+                double rate = std::stod(params.getParameter("risk_free_rate", "7.0"));
+                std::cout << std::string(70, '=') << std::endl;
+                return RiskFreeRateCalculator::fromRate(
+                    rate / 100.0, tradingDates.size());
+            }
+
+            std::cout << std::string(70, '=') << std::endl;
+            return calcResult;
+        }
+
+        // Случай 2: Используем фиксированную ставку
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "Risk-Free Rate Initialization (from fixed rate)" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+
+        try {
+            double rate = std::stod(params.getParameter("risk_free_rate", "7.0"));
+            auto calc = RiskFreeRateCalculator::fromRate(
+                rate / 100.0, tradingDates.size());
+            std::cout << std::string(70, '=') << std::endl;
+            return calc;
+        } catch (const std::exception& e) {
+            return std::unexpected(
+                std::string("Invalid risk_free_rate parameter: ") + e.what());
+        }
+    }
+
 };
 
 } // namespace portfolio

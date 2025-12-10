@@ -802,7 +802,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
     std::cout << std::endl;
 
     // Вывод таблицы атрибутов
-    std::cout << std::string(80, '─') << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
     std::cout << std::left
               << std::setw(20) << "Attribute"
               << std::setw(15) << "Source"
@@ -810,7 +810,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
               << std::setw(20) << "First Date"
               << std::setw(20) << "Last Date"
               << std::endl;
-    std::cout << std::string(80, '─') << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
 
     for (const auto& attr : attributes) {
         // Форматируем даты
@@ -835,7 +835,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
                   << std::endl;
     }
 
-    std::cout << std::string(80, '─') << std::endl << std::endl;
+    std::cout << std::string(80, '-') << std::endl << std::endl;
 
     // Дополнительная информация
     std::cout << "TIP: Use 'portfolio load' to add more attributes" << std::endl;
@@ -845,18 +845,94 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
     return {};
 }
 
-std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(const ParsedCommand& cmd)
+std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
+    const ParsedCommand& cmd)
 {
+    // ════════════════════════════════════════════════════════════════════════
+    // Инициализация базы данных из опций командной строки
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string dbType = "InMemory";
+    std::string dbPath;
+
+    if (cmd.options.count("db")) {
+        dbType = cmd.options.at("db").as<std::string>();
+    }
+
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
+    }
+
+    // Инициализируем базу данных если необходимо
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение ID инструмента
+    // ════════════════════════════════════════════════════════════════════════
+
     auto idResult = getRequiredOption<std::string>(cmd, "instrument-id");
     if (!idResult) {
         return std::unexpected(idResult.error());
     }
 
+    std::string instrumentId = idResult.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Проверка инициализации базы данных
+    // ════════════════════════════════════════════════════════════════════════
+
     if (!database_) {
         return std::unexpected("Database not initialized");
     }
 
-    return database_->deleteInstruments(idResult.value());
+    // ════════════════════════════════════════════════════════════════════════
+    // Проверка существования инструмента
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto existsResult = database_->instrumentExists(instrumentId);
+    if (!existsResult) {
+        return std::unexpected(existsResult.error());
+    }
+
+    if (!existsResult.value()) {
+        return std::unexpected("Instrument not found: " + instrumentId);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Подтверждение удаления (опционально)
+    // ════════════════════════════════════════════════════════════════════════
+
+    bool confirmRequired = true;
+    if (cmd.options.count("confirm")) {
+        confirmRequired = false;
+    }
+
+    if (confirmRequired) {
+        std::cout << "\nWarning: This will delete instrument '" << instrumentId
+                  << "' and all its data." << std::endl;
+        std::cout << "Use --confirm flag to proceed with deletion." << std::endl;
+        return std::unexpected("Deletion not confirmed");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Удаление инструмента
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto deleteResult = database_->deleteInstruments(instrumentId);
+    if (!deleteResult) {
+        return std::unexpected(deleteResult.error());
+    }
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "SUCCESS" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Instrument '" << instrumentId << "' deleted successfully" << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    return {};
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

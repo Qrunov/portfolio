@@ -445,7 +445,6 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  -t, --instrument-id ID  Instrument ID" << std::endl;
         std::cout << "  --db TYPE               Database type" << std::endl;
         std::cout << "  --db-path PATH          Database file path" << std::endl;
-        std::cout << "  --confirm               Confirm deletion (for delete)" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
@@ -465,7 +464,7 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  portfolio instrument show -t SBER --db SQLite --db-path=./market.db" << std::endl;
         std::cout << std::endl;
         std::cout << "  # Delete instrument" << std::endl;
-        std::cout << "  portfolio instrument delete -t SBER --confirm" << std::endl;
+        std::cout << "  portfolio instrument delete -t SBER" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "portfolio") {
@@ -899,22 +898,6 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
 
     if (!existsResult.value()) {
         return std::unexpected("Instrument not found: " + instrumentId);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Подтверждение удаления (опционально)
-    // ════════════════════════════════════════════════════════════════════════
-
-    bool confirmRequired = true;
-    if (cmd.options.count("confirm")) {
-        confirmRequired = false;
-    }
-
-    if (confirmRequired) {
-        std::cout << "\nWarning: This will delete instrument '" << instrumentId
-                  << "' and all its data." << std::endl;
-        std::cout << "Use --confirm flag to proceed with deletion." << std::endl;
-        return std::unexpected("Deletion not confirmed");
     }
 
     // ════════════════════════════════════════════════════════════════════════

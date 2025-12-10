@@ -567,13 +567,32 @@ void CommandExecutor::printHelp(std::string_view topic)
 
         std::cout << "SUBCOMMANDS:" << std::endl;
         std::cout << "  list [TYPE]             List plugins (database, strategy)" << std::endl;
-        std::cout << "  info NAME               Show plugin information" << std::endl;
+        std::cout << "  info NAME               Show detailed plugin information" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "LIST OPTIONS:" << std::endl;
+        std::cout << "  --type TYPE             Filter by plugin type" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "INFO OPTIONS:" << std::endl;
+        std::cout << "  --name NAME             Plugin name (system name)" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # List all plugins" << std::endl;
         std::cout << "  portfolio plugin list" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # List only database plugins" << std::endl;
         std::cout << "  portfolio plugin list database" << std::endl;
+        std::cout << "  portfolio plugin list --type database" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # List only strategy plugins" << std::endl;
         std::cout << "  portfolio plugin list strategy" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # Show plugin information" << std::endl;
+        std::cout << "  portfolio plugin info sqlite_db" << std::endl;
+        std::cout << "  portfolio plugin info buyhold_strategy" << std::endl;
+        std::cout << "  portfolio plugin info --name inmemory_db" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else {
@@ -1880,14 +1899,30 @@ std::expected<void, std::string> CommandExecutor::executePlugin(const ParsedComm
 std::expected<void, std::string> CommandExecutor::executePluginList(
     const ParsedCommand& cmd)
 {
-    // Получаем фильтр по типу если указан
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение фильтра по типу плагина
+    // ════════════════════════════════════════════════════════════════════════
+
     std::string typeFilter;
+
+    // Проверяем опцию --type
     if (cmd.options.count("type")) {
         typeFilter = cmd.options.at("type").as<std::string>();
     }
+    // Если опция не указана, проверяем позиционные аргументы
+    else if (!cmd.positional.empty()) {
+        typeFilter = cmd.positional[0];
+    }
 
-    // Получаем список доступных плагинов
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение списка доступных плагинов
+    // ════════════════════════════════════════════════════════════════════════
+
     auto availablePlugins = pluginManager_->getAvailablePlugins(typeFilter);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Обработка пустого результата
+    // ════════════════════════════════════════════════════════════════════════
 
     if (availablePlugins.empty()) {
         if (typeFilter.empty()) {
@@ -1896,18 +1931,32 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
             std::cout << "Set PORTFOLIO_PLUGIN_PATH environment variable to change the search path." << std::endl;
         } else {
             std::cout << "No '" << typeFilter << "' plugins found." << std::endl;
+            std::cout << "\nAvailable plugin types: database, strategy" << std::endl;
         }
         return {};
     }
 
-    // Группируем плагины по типу
+    // ════════════════════════════════════════════════════════════════════════
+    // Группировка плагинов по типу
+    // ════════════════════════════════════════════════════════════════════════
+
     std::map<std::string, std::vector<PluginManager<IPortfolioDatabase>::AvailablePlugin>> pluginsByType;
     for (const auto& plugin : availablePlugins) {
         pluginsByType[plugin.type].push_back(plugin);
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод информации о плагинах
+    // ════════════════════════════════════════════════════════════════════════
+
     std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "Available Plugins" << std::endl;
+    std::cout << "Available Plugins";
+    if (!typeFilter.empty()) {
+        std::string typeTitle = typeFilter;
+        typeTitle[0] = std::toupper(typeTitle[0]);
+        std::cout << " (" << typeTitle << ")";
+    }
+    std::cout << std::endl;
     std::cout << std::string(70, '=') << std::endl;
     std::cout << "Plugin path: " << pluginManager_->getPluginPath() << std::endl;
     std::cout << std::string(70, '=') << std::endl << std::endl;
@@ -1935,12 +1984,184 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
     return {};
 }
 
+
 std::expected<void, std::string> CommandExecutor::executePluginInfo(
     const ParsedCommand& cmd)
 {
-    // Эта команда может быть расширена для показа детальной информации о конкретном плагине
-    std::cout << "Plugin info command not yet implemented." << std::endl;
-    std::cout << "Use 'portfolio plugin list' to see available plugins." << std::endl;
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение имени плагина из аргументов
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string pluginName;
+
+    // Проверяем опцию --name
+    if (cmd.options.count("name")) {
+        pluginName = cmd.options.at("name").as<std::string>();
+    }
+    // Если опция не указана, проверяем позиционные аргументы
+    else if (!cmd.positional.empty()) {
+        pluginName = cmd.positional[0];
+    }
+
+    // Если имя не задано, выводим ошибку
+    if (pluginName.empty()) {
+        return std::unexpected(
+            "Plugin name is required.\n"
+            "Usage: portfolio plugin info <plugin_name>\n"
+            "       portfolio plugin info --name <plugin_name>\n"
+            "\n"
+            "Use 'portfolio plugin list' to see available plugins."
+            );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Поиск плагина в списке доступных
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto availablePlugins = pluginManager_->getAvailablePlugins();
+
+    // Ищем плагин по системному имени или отображаемому имени
+    const PluginManager<IPortfolioDatabase>::AvailablePlugin* foundPlugin = nullptr;
+
+    for (const auto& plugin : availablePlugins) {
+        if (plugin.name == pluginName || plugin.displayName == pluginName) {
+            foundPlugin = &plugin;
+            break;
+        }
+    }
+
+    // Если плагин не найден, выводим ошибку
+    if (!foundPlugin) {
+        std::string errorMsg = "Plugin '" + pluginName + "' not found.\n\n";
+        errorMsg += "Available plugins:\n";
+
+        for (const auto& plugin : availablePlugins) {
+            errorMsg += "  - " + plugin.name;
+            if (plugin.name != plugin.displayName) {
+                errorMsg += " (" + plugin.displayName + ")";
+            }
+            errorMsg += "\n";
+        }
+
+        return std::unexpected(errorMsg);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод информации о плагине
+    // ════════════════════════════════════════════════════════════════════════
+
+    const auto& plugin = *foundPlugin;
+
+    // Форматируем тип плагина с заглавной буквы
+    std::string typeTitle = plugin.type;
+    if (!typeTitle.empty()) {
+        typeTitle[0] = std::toupper(typeTitle[0]);
+    }
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "PLUGIN INFORMATION" << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    // Основная информация
+    std::cout << "Display Name:  " << plugin.displayName << std::endl;
+    std::cout << "System Name:   " << plugin.name << std::endl;
+    std::cout << "Version:       " << plugin.version << std::endl;
+    std::cout << "Type:          " << typeTitle << std::endl;
+    std::cout << std::endl;
+
+    // Информация о пути
+    std::cout << "Location:" << std::endl;
+    std::cout << "  Path:        " << plugin.path << std::endl;
+
+    // Проверяем существование файла
+    std::filesystem::path pluginPath(plugin.path);
+    if (std::filesystem::exists(pluginPath)) {
+        std::cout << "  Status:      ✓ File exists" << std::endl;
+
+        // Размер файла
+        auto fileSize = std::filesystem::file_size(pluginPath);
+        std::cout << "  Size:        ";
+        if (fileSize < 1024) {
+            std::cout << fileSize << " bytes";
+        } else if (fileSize < 1024 * 1024) {
+            std::cout << std::fixed << std::setprecision(1)
+            << (fileSize / 1024.0) << " KB";
+        } else {
+            std::cout << std::fixed << std::setprecision(2)
+            << (fileSize / (1024.0 * 1024.0)) << " MB";
+        }
+        std::cout << std::endl;
+
+        // Время последней модификации
+        auto lastWrite = std::filesystem::last_write_time(pluginPath);
+        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            lastWrite - std::filesystem::file_time_type::clock::now()
+            + std::chrono::system_clock::now()
+            );
+        auto time = std::chrono::system_clock::to_time_t(sctp);
+        std::cout << "  Modified:    " << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S")
+                  << std::endl;
+
+    } else {
+        std::cout << "  Status:      ✗ File not found" << std::endl;
+    }
+
+    std::cout << std::endl;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Проверка загружен ли плагин
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto loadedPlugins = pluginManager_->listLoadedPlugins();
+    bool isLoaded = std::find(loadedPlugins.begin(), loadedPlugins.end(),
+                              plugin.name) != loadedPlugins.end();
+
+    std::cout << "Runtime Status:" << std::endl;
+    if (isLoaded) {
+        std::cout << "  Status:      ✓ Loaded in memory" << std::endl;
+        std::cout << "  Note:        Plugin is currently active and in use" << std::endl;
+    } else {
+        std::cout << "  Status:      ○ Not loaded" << std::endl;
+        std::cout << "  Note:        Plugin will be loaded on first use" << std::endl;
+    }
+
+    std::cout << std::endl;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Информация об использовании
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::cout << "Usage:" << std::endl;
+
+    if (plugin.type == "database") {
+        std::cout << "  To use this database plugin:" << std::endl;
+        std::cout << "    portfolio load ... --db " << plugin.name << std::endl;
+        std::cout << "    portfolio instrument list --db " << plugin.name << std::endl;
+        std::cout << std::endl;
+        std::cout << "  Example with SQLite database:" << std::endl;
+        std::cout << "    portfolio load -f data.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
+        std::cout << "      --db " << plugin.name << " --db-path=./market.db" << std::endl;
+
+    } else if (plugin.type == "strategy") {
+        std::cout << "  To use this strategy plugin:" << std::endl;
+        std::cout << "    portfolio strategy execute -s " << plugin.name
+                  << " -p MyPortfolio \\" << std::endl;
+        std::cout << "      --from 2020-01-01 --to 2024-12-31" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  With database specification:" << std::endl;
+        std::cout << "    portfolio strategy execute -s " << plugin.name
+                  << " -p MyPortfolio \\" << std::endl;
+        std::cout << "      --db SQLite --db-path=./market.db \\" << std::endl;
+        std::cout << "      --from 2020-01-01 --to 2024-12-31" << std::endl;
+
+    } else {
+        std::cout << "  Plugin type: " << plugin.type << std::endl;
+        std::cout << "  Refer to documentation for usage information." << std::endl;
+    }
+
+    std::cout << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
     return {};
 }
 

@@ -80,8 +80,26 @@
             } else if (result.command == "plugin") {
                 auto desc = createPluginOptions();
                 std::vector<std::string> args(argv + startIdx, argv + argc);
-                po::store(po::command_line_parser(args).options(desc).run(), result.options);
+
+                // Используем allow_unregistered для захвата позиционных аргументов
+                auto parsed = po::command_line_parser(args)
+                                  .options(desc)
+                                  .allow_unregistered()
+                                  .run();
+
+                po::store(parsed, result.options);
                 po::notify(result.options);
+
+                // Собираем нераспознанные (позиционные) аргументы
+                std::vector<std::string> unrecognized =
+                    po::collect_unrecognized(parsed.options, po::include_positional);
+
+                for (const auto& arg : unrecognized) {
+                    // Пропускаем аргументы начинающиеся с "-" (это опции)
+                    if (!arg.empty() && arg[0] != '-') {
+                        result.positional.push_back(arg);
+                    }
+                }
 
             } else if (result.command == "help" || result.command == "version") {
                 for (int i = startIdx; i < argc; ++i) {
@@ -192,10 +210,13 @@
     po::options_description CommandLineParser::createPluginOptions() {
         po::options_description desc("Plugin options");
         desc.add_options()
-            ("type,t", po::value<std::string>(), "Filter by plugin type")
+            ("name,n", po::value<std::string>(), "Plugin name (for info command)")
+            ("type,t", po::value<std::string>(), "Filter by plugin type (for list command)")
             ("help,h", "Show help message");
         return desc;
     }
+
+
 
     po::options_description CommandLineParser::createCommonOptions() {
         po::options_description desc("Common options");

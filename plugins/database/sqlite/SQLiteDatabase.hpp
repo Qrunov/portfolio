@@ -67,6 +67,26 @@ public:
 
     Result deleteSource(std::string_view source) override;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Информация об инструменте и атрибутах
+    // ═══════════════════════════════════════════════════════════════════════
+
+    std::expected<InstrumentInfo, std::string> getInstrument(
+        std::string_view instrumentId
+        ) override;
+
+    std::expected<std::vector<AttributeInfo>, std::string> listInstrumentAttributes(
+        std::string_view instrumentId
+        ) override;
+
+    std::expected<std::size_t, std::string> getAttributeValueCount(
+        std::string_view instrumentId,
+        std::string_view attributeName,
+        std::string_view sourceFilter = ""
+        ) override;
+
+
+
 private:
     Result initialize();
     Result createTables();

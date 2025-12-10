@@ -20,6 +20,25 @@ using Result = std::expected<void, std::string>;
 
 class IPortfolioDatabase {
 public:
+    // ═══════════════════════════════════════════════════════════════════════
+    // Структуры данных для информации об инструментах и атрибутах
+    // ═══════════════════════════════════════════════════════════════════════
+
+    struct InstrumentInfo {
+        std::string id;
+        std::string name;
+        std::string type;
+        std::string source;
+    };
+
+    struct AttributeInfo {
+        std::string name;
+        std::string source;
+        std::size_t valueCount;
+        TimePoint firstTimestamp;
+        TimePoint lastTimestamp;
+    };
+
     virtual ~IPortfolioDatabase() = default;
 
     virtual std::expected<std::vector<std::string>, std::string> listSources() = 0;
@@ -77,6 +96,28 @@ public:
     ) = 0;
 
     virtual Result deleteSource(std::string_view source) = 0;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Методы для получения информации об инструментах и атрибутах
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Получить полную информацию об инструменте
+    virtual std::expected<IPortfolioDatabase::InstrumentInfo, std::string> getInstrument(
+        std::string_view instrumentId
+        ) = 0;
+
+    // Получить список всех атрибутов инструмента с метаданными
+    virtual std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> listInstrumentAttributes(
+        std::string_view instrumentId
+        ) = 0;
+
+    // Получить количество значений для конкретного атрибута
+    virtual std::expected<std::size_t, std::string> getAttributeValueCount(
+        std::string_view instrumentId,
+        std::string_view attributeName,
+        std::string_view sourceFilter = ""
+        ) = 0;
+
 };
 
 }  // namespace portfolio

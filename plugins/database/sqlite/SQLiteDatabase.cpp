@@ -606,4 +606,162 @@ AttributeValue SQLiteDatabase::stringToAttributeValue(
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// НОВЫЕ МЕТОДЫ: Информация об инструменте и атрибутах
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::expected<IPortfolioDatabase::InstrumentInfo, std::string> SQLiteDatabase::getInstrument(std::string_view instrumentId)
+{
+    const char* sql = R"(
+        SELECT instrument_id, name, type, source
+        FROM instruments
+        WHERE instrument_id = ?
+    )";
+
+    sqlite3_stmt* stmt;
+    int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    if (rc != SQLITE_OK) {
+        return std::unexpected("Failed to prepare statement: " +
+                               std::string(sqlite3_errmsg(db_)));
+    }
+
+    sqlite3_bind_text(stmt, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        if (rc == SQLITE_DONE) {
+            return std::unexpected("Instrument not found: " + std::string(instrumentId));
+        }
+        return std::unexpected("Error reading instrument: " +
+                               std::string(sqlite3_errmsg(db_)));
+    }
+
+    InstrumentInfo info;
+    info.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+    info.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+    info.type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+    info.source = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+
+    sqlite3_finalize(stmt);
+
+    return info;
+}
+
+std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> SQLiteDatabase::listInstrumentAttributes(std::string_view instrumentId)
+{
+    // Сначала проверяем существование инструмента
+    auto instCheck = instrumentExists(instrumentId);
+    if (!instCheck || !instCheck.value()) {
+        return std::unexpected("Instrument not found: " + std::string(instrumentId));
+    }
+
+    const char* sql = R"(
+        SELECT
+            attribute_name,
+            source,
+            COUNT(*) as value_count,
+            MIN(timestamp) as first_timestamp,
+            MAX(timestamp) as last_timestamp
+        FROM attributes
+        WHERE instrument_id = ?
+        GROUP BY attribute_name, source
+        ORDER BY attribute_name, source
+    )";
+
+    sqlite3_stmt* stmt;
+    int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    if (rc != SQLITE_OK) {
+        return std::unexpected("Failed to prepare statement: " +
+                               std::string(sqlite3_errmsg(db_)));
+    }
+
+    sqlite3_bind_text(stmt, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
+
+    std::vector<AttributeInfo> result;
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        AttributeInfo info;
+
+        info.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        info.source = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        info.valueCount = sqlite3_column_int64(stmt, 2);
+
+        const char* firstTimeStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        const char* lastTimeStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+
+        info.firstTimestamp = stringToTimePoint(firstTimeStr);
+        info.lastTimestamp = stringToTimePoint(lastTimeStr);
+
+        result.push_back(info);
+    }
+
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        return std::unexpected("Error reading attributes: " +
+                               std::string(sqlite3_errmsg(db_)));
+    }
+
+    return result;
+}
+
+std::expected<std::size_t, std::string> SQLiteDatabase::getAttributeValueCount(
+    std::string_view instrumentId,
+    std::string_view attributeName,
+    std::string_view sourceFilter)
+{
+    // Проверяем существование инструмента
+    auto instCheck = instrumentExists(instrumentId);
+    if (!instCheck || !instCheck.value()) {
+        return std::unexpected("Instrument not found: " + std::string(instrumentId));
+    }
+
+    std::string sql = R"(
+        SELECT COUNT(*)
+        FROM attributes
+        WHERE instrument_id = ? AND attribute_name = ?
+    )";
+
+    if (!sourceFilter.empty()) {
+        sql += " AND source = ?";
+    }
+
+    sqlite3_stmt* stmt;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+
+    if (rc != SQLITE_OK) {
+        return std::unexpected("Failed to prepare statement: " +
+                               std::string(sqlite3_errmsg(db_)));
+    }
+
+    sqlite3_bind_text(stmt, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, attributeName.data(), attributeName.size(), SQLITE_TRANSIENT);
+
+    if (!sourceFilter.empty()) {
+        sqlite3_bind_text(stmt, 3, sourceFilter.data(), sourceFilter.size(), SQLITE_TRANSIENT);
+    }
+
+    rc = sqlite3_step(stmt);
+
+    std::size_t count = 0;
+    if (rc == SQLITE_ROW) {
+        count = sqlite3_column_int64(stmt, 0);
+    }
+
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        return std::unexpected("Error counting attributes: " +
+                               std::string(sqlite3_errmsg(db_)));
+    }
+
+    return count;
+}
+
+
+
 } // namespace portfolio

@@ -97,6 +97,20 @@ public:
 
     Result deleteSource(std::string_view source) override;
 
+    std::expected<IPortfolioDatabase::InstrumentInfo, std::string> getInstrument(
+        std::string_view instrumentId
+        ) override;
+
+    std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> listInstrumentAttributes(
+        std::string_view instrumentId
+        ) override;
+
+    std::expected<std::size_t, std::string> getAttributeValueCount(
+        std::string_view instrumentId,
+        std::string_view attributeName,
+        std::string_view sourceFilter = ""
+        ) override;
+
     // Вспомогательные методы для тестирования
     size_t getInstrumentCount() const { return instruments_.size(); }
     size_t getAttributeCount(std::string_view instrumentId) const;

@@ -61,9 +61,6 @@ protected:
 
         defaults["risk_free_rate"] = "7.0";           // Процент годовых
         defaults["risk_free_instrument"] = "";        // Инструмент (например, SBMM)
-
-
-
         return defaults;
     }
 

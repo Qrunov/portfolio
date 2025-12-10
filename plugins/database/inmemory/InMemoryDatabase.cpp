@@ -267,4 +267,141 @@ size_t InMemoryDatabase::getAttributeCount(std::string_view instrumentId) const 
     return count;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// НОВЫЕ МЕТОДЫ: Информация об инструменте и атрибутах
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::expected<IPortfolioDatabase::InstrumentInfo, std::string> InMemoryDatabase::getInstrument(std::string_view instrumentId)
+{
+    std::string id(instrumentId);
+
+    auto it = instruments_.find(id);
+    if (it == instruments_.end()) {
+        return std::unexpected("Instrument not found: " + id);
+    }
+
+    const auto& inst = it->second;
+
+    InstrumentInfo info;
+    info.id = inst.id;
+    info.name = inst.name;
+    info.type = inst.type;
+    info.source = inst.source;
+
+    return info;
+}
+
+std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> InMemoryDatabase::listInstrumentAttributes(std::string_view instrumentId)
+{
+    std::string id(instrumentId);
+
+    // Проверяем существование инструмента
+    if (instruments_.find(id) == instruments_.end()) {
+        return std::unexpected("Instrument not found: " + id);
+    }
+
+    std::vector<AttributeInfo> result;
+
+    // Проверяем наличие атрибутов
+    auto attrIt = attributes_.find(id);
+    if (attrIt == attributes_.end() || attrIt->second.empty()) {
+        return result;  // Пустой вектор - нет атрибутов
+    }
+
+    // Группируем атрибуты по имени и источнику
+    std::map<std::pair<std::string, std::string>, AttributeInfo> groupedAttrs;
+
+    for (const auto& [attrName, entries] : attrIt->second) {
+        if (entries.empty()) {
+            continue;
+        }
+
+        // Группируем по источнику
+        std::map<std::string, std::vector<const AttributeEntry*>> bySource;
+        for (const auto& entry : entries) {
+            bySource[entry.source].push_back(&entry);
+        }
+
+        // Создаем AttributeInfo для каждого источника
+        for (const auto& [source, sourceEntries] : bySource) {
+            AttributeInfo info;
+            info.name = attrName;
+            info.source = source;
+            info.valueCount = sourceEntries.size();
+
+            // Находим первый и последний timestamp
+            TimePoint minTime = sourceEntries[0]->timestamp;
+            TimePoint maxTime = sourceEntries[0]->timestamp;
+
+            for (const auto* entry : sourceEntries) {
+                if (entry->timestamp < minTime) {
+                    minTime = entry->timestamp;
+                }
+                if (entry->timestamp > maxTime) {
+                    maxTime = entry->timestamp;
+                }
+            }
+
+            info.firstTimestamp = minTime;
+            info.lastTimestamp = maxTime;
+
+            result.push_back(info);
+        }
+    }
+
+    // Сортируем по имени атрибута, затем по источнику
+    std::sort(result.begin(), result.end(),
+              [](const AttributeInfo& a, const AttributeInfo& b) {
+                  if (a.name != b.name) {
+                      return a.name < b.name;
+                  }
+                  return a.source < b.source;
+              }
+              );
+
+    return result;
+}
+
+std::expected<std::size_t, std::string> InMemoryDatabase::getAttributeValueCount(
+    std::string_view instrumentId,
+    std::string_view attributeName,
+    std::string_view sourceFilter)
+{
+    std::string id(instrumentId);
+    std::string attrName(attributeName);
+    std::string sourceStr(sourceFilter);
+
+    // Проверяем существование инструмента
+    if (instruments_.find(id) == instruments_.end()) {
+        return std::unexpected("Instrument not found: " + id);
+    }
+
+    auto attrIt = attributes_.find(id);
+    if (attrIt == attributes_.end()) {
+        return 0;  // Нет атрибутов для этого инструмента
+    }
+
+    auto nameIt = attrIt->second.find(attrName);
+    if (nameIt == attrIt->second.end()) {
+        return 0;  // Нет такого атрибута
+    }
+
+    const auto& entries = nameIt->second;
+
+    // Если нет фильтра по источнику, возвращаем общее количество
+    if (sourceStr.empty()) {
+        return entries.size();
+    }
+
+    // Подсчитываем записи с нужным источником
+    std::size_t count = 0;
+    for (const auto& entry : entries) {
+        if (entry.source == sourceStr) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
 }  // namespace portfolio

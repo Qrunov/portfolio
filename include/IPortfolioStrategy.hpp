@@ -120,7 +120,7 @@ public:
         const PortfolioParams& params,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        double initialCapital) = 0;
+        double initialCapital) = 0;  //TODO  initialCapital надо исключить, он задается в параметрах стратегии
 
     IPortfolioStrategy(const IPortfolioStrategy&) = delete;
     IPortfolioStrategy& operator=(const IPortfolioStrategy&) = delete;

@@ -358,25 +358,121 @@ std::expected<void, std::string> CommandExecutor::executeVersion(const ParsedCom
 void CommandExecutor::printHelp(std::string_view topic)
 {
     if (topic.empty()) {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "Portfolio Management System" << std::endl;
         std::cout << "Usage: portfolio <command> [options]" << std::endl << std::endl;
 
         std::cout << "COMMANDS:" << std::endl;
+        std::cout << "  load                    Load data from CSV file" << std::endl;
+        std::cout << "  instrument              Manage instruments" << std::endl;
         std::cout << "  portfolio               Manage portfolios" << std::endl;
         std::cout << "  strategy                Execute trading strategies" << std::endl;
         std::cout << "  source                  Manage data sources" << std::endl;
         std::cout << "  plugin                  Manage plugins" << std::endl;
         std::cout << "  help <command>          Show detailed help for a command" << std::endl;
+        std::cout << "  version                 Show version information" << std::endl;
         std::cout << std::endl;
 
         std::cout << "Examples:" << std::endl;
+        std::cout << "  portfolio help load" << std::endl;
+        std::cout << "  portfolio help instrument" << std::endl;
         std::cout << "  portfolio help portfolio" << std::endl;
         std::cout << "  portfolio help strategy" << std::endl;
-        std::cout << "  portfolio help source" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "For more information on a specific command, use:" << std::endl;
+        std::cout << "  portfolio help <command>" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+
+    } else if (topic == "load") {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "COMMAND: load" << std::endl;
+        std::cout << "Load instrument data from CSV file" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+
+        std::cout << "USAGE:" << std::endl;
+        std::cout << "  portfolio load -f FILE -t ID -n NAME -s SOURCE [OPTIONS]" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "REQUIRED OPTIONS:" << std::endl;
+        std::cout << "  -f, --file FILE         CSV file path" << std::endl;
+        std::cout << "  -t, --instrument-id ID  Instrument ID (e.g., SBER, GAZP)" << std::endl;
+        std::cout << "  -n, --name NAME         Instrument full name" << std::endl;
+        std::cout << "  -s, --source SOURCE     Data source name (e.g., MOEX, Yahoo)" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "OPTIONAL OPTIONS:" << std::endl;
+        std::cout << "  -T, --type TYPE         Instrument type (default: stock)" << std::endl;
+        std::cout << "  -d, --delimiter CHAR    CSV delimiter (default: ',')" << std::endl;
+        std::cout << "  --date-column NUM       Date column index, 1-based (default: 1)" << std::endl;
+        std::cout << "  --date-format FORMAT    Date format (default: %Y-%m-%d)" << std::endl;
+        std::cout << "  --skip-header BOOL      Skip CSV header (default: true)" << std::endl;
+        std::cout << "  -m, --map MAPPING       Attribute mapping (col:attr format)" << std::endl;
+        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # Load SBER data to in-memory database" << std::endl;
+        std::cout << "  portfolio load -f sber.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
+        std::cout << "    -m 2:Close -m 3:Volume" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # Load data to SQLite database" << std::endl;
+        std::cout << "  portfolio load -f data.csv -t GAZP -n \"Gazprom\" -s MOEX \\" << std::endl;
+        std::cout << "    --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+
+    } else if (topic == "instrument") {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "COMMAND: instrument" << std::endl;
+        std::cout << "Manage financial instruments" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+
+        std::cout << "SUBCOMMANDS:" << std::endl;
+        std::cout << "  list                    List all instruments" << std::endl;
+        std::cout << "  show -t ID              Show instrument details" << std::endl;
+        std::cout << "  delete -t ID            Delete an instrument" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "LIST OPTIONS:" << std::endl;
+        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl;
+        std::cout << "  --type TYPE             Filter by instrument type" << std::endl;
+        std::cout << "  -s, --source SOURCE     Filter by data source" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "SHOW/DELETE OPTIONS:" << std::endl;
+        std::cout << "  -t, --instrument-id ID  Instrument ID" << std::endl;
+        std::cout << "  --db TYPE               Database type" << std::endl;
+        std::cout << "  --db-path PATH          Database file path" << std::endl;
+        std::cout << "  --confirm               Confirm deletion (for delete)" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "EXAMPLES:" << std::endl;
+        std::cout << "  # List all instruments from in-memory database" << std::endl;
+        std::cout << "  portfolio instrument list" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # List instruments from SQLite database" << std::endl;
+        std::cout << "  portfolio instrument list --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # List only stocks" << std::endl;
+        std::cout << "  portfolio instrument list --type stock" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # List instruments from specific source" << std::endl;
+        std::cout << "  portfolio instrument list --source MOEX" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # Show instrument details" << std::endl;
+        std::cout << "  portfolio instrument show -t SBER --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # Delete instrument" << std::endl;
+        std::cout << "  portfolio instrument delete -t SBER --confirm" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "portfolio") {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: portfolio" << std::endl;
-        std::cout << "Manage investment portfolios" << std::endl << std::endl;
+        std::cout << "Manage investment portfolios" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
         std::cout << "  create                  Create a new portfolio" << std::endl;
@@ -391,92 +487,84 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "CREATE OPTIONS:" << std::endl;
         std::cout << "  -n, --name NAME         Portfolio name (required)" << std::endl;
         std::cout << "  -d, --description DESC  Portfolio description" << std::endl;
-        std::cout << "  --capital AMOUNT        Initial capital" << std::endl;
+        std::cout << "  --initial-capital AMT   Initial capital (default: 100000)" << std::endl;
         std::cout << std::endl;
 
         std::cout << "SET-PARAM OPTIONS:" << std::endl;
         std::cout << "  -p, --portfolio NAME    Portfolio name (required)" << std::endl;
-        std::cout << "  -P key:value            Parameter to set (can be repeated)" << std::endl;
+        std::cout << "  -P, --param KEY:VALUE   Parameter in key:value format" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  portfolio portfolio create -n MyPort --capital 100000" << std::endl;
+        std::cout << "  portfolio portfolio create -n MyPortfolio --initial-capital 100000" << std::endl;
         std::cout << "  portfolio portfolio list" << std::endl;
-        std::cout << "  portfolio portfolio show -p MyPort" << std::endl;
-        std::cout << "  portfolio portfolio set-param -p MyPort -P tax:true -P ndfl_rate:0.15" << std::endl;
+        std::cout << "  portfolio portfolio show -p MyPortfolio --detail" << std::endl;
+        std::cout << "  portfolio portfolio set-param -p MyPortfolio -P calendar:RTSI" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "strategy") {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: strategy" << std::endl;
-        std::cout << "Execute trading strategies and view parameters" << std::endl << std::endl;
+        std::cout << "Execute and manage trading strategies" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
         std::cout << "  list                    List available strategies" << std::endl;
-        std::cout << "  params [-s STRATEGY]    Show strategy parameters" << std::endl;
-        std::cout << "  execute                 Execute strategy backtest" << std::endl << std::endl;
-
-        std::cout << "PARAMS OPTIONS:" << std::endl;
-        std::cout << "  -s, --strategy NAME     Show parameters for specific strategy" << std::endl;
-        std::cout << "                          (omit to see common parameters)" << std::endl << std::endl;
+        std::cout << "  info -s NAME            Show strategy details" << std::endl;
+        std::cout << "  execute                 Execute a strategy backtest" << std::endl;
+        std::cout << std::endl;
 
         std::cout << "EXECUTE OPTIONS:" << std::endl;
         std::cout << "  -s, --strategy NAME     Strategy name (required)" << std::endl;
         std::cout << "  -p, --portfolio NAME    Portfolio name (required)" << std::endl;
-        std::cout << "  --from YYYY-MM-DD       Start date (required)" << std::endl;
-        std::cout << "  --to YYYY-MM-DD         End date (required)" << std::endl;
-        std::cout << "  -P key:value            Override parameters (repeatable)" << std::endl;
+        std::cout << "  --from DATE             Start date YYYY-MM-DD (required)" << std::endl;
+        std::cout << "  --to DATE               End date YYYY-MM-DD (required)" << std::endl;
         std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl << std::endl;
+        std::cout << "  --db-path PATH          Database file path" << std::endl;
+        std::cout << "  -P, --param KEY:VALUE   Strategy parameter" << std::endl;
+        std::cout << std::endl;
 
-        std::cout << "COMMON PARAMETERS:" << std::endl;
+        std::cout << "AVAILABLE PARAMETERS:" << std::endl;
         std::cout << "  calendar:INSTRUMENT     Trading calendar reference (default: IMOEX)" << std::endl;
-        std::cout << "  inflation:INSTRUMENT    Inflation data source (default: INF)" << std::endl;
-        std::cout << "  tax:true/false          Enable tax calculation (default: false)" << std::endl;
-        std::cout << "  ndfl_rate:0.13          Tax rate 0-1 (default: 0.13)" << std::endl;
-        std::cout << "  long_term_exemption     3+ year exemption (default: true)" << std::endl;
-        std::cout << "  lot_method:FIFO         FIFO, LIFO, MinTax (default: FIFO)" << std::endl;
-        std::cout << "  import_losses:0         Previous losses in RUB (default: 0)" << std::endl;
-        std::cout << "  initial_capital:100000  Override portfolio capital" << std::endl << std::endl;
+        std::cout << "  inflation:INSTRUMENT    Inflation adjustment (default: INF)" << std::endl;
+        std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  # List available strategies" << std::endl;
-        std::cout << "  portfolio strategy list" << std::endl << std::endl;
-
-        std::cout << "  # Show common parameters" << std::endl;
-        std::cout << "  portfolio strategy params" << std::endl << std::endl;
-
-        std::cout << "  # Show parameters for specific strategy" << std::endl;
-        std::cout << "  portfolio strategy params -s BuyHold" << std::endl << std::endl;
-
-        std::cout << "  # Execute with default parameters" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p MyPort \\" << std::endl;
-        std::cout << "    --from 2024-01-01 --to 2024-12-31" << std::endl << std::endl;
-
-        std::cout << "  # Execute with custom parameters" << std::endl;
+        std::cout << "  portfolio strategy list" << std::endl;
+        std::cout << "  portfolio strategy info -s BuyHold" << std::endl;
         std::cout << "  portfolio strategy execute -s BuyHold -p MyPort \\" << std::endl;
         std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    -P tax:true -P lot_method:MinTax -P ndfl_rate:0.15" << std::endl << std::endl;
-
-        std::cout << "  # Save parameters to portfolio" << std::endl;
-        std::cout << "  portfolio portfolio set-param -p MyPort \\" << std::endl;
-        std::cout << "    -P tax:true -P lot_method:MinTax" << std::endl << std::endl;
-
-        std::cout << "NOTE: Parameters set with 'set-param' are saved with portfolio" << std::endl;
-        std::cout << "      and used automatically. Command-line -P overrides saved values." << std::endl;
+        std::cout << "    --db SQLite --db-path=./market.db \\" << std::endl;
+        std::cout << "    -P calendar:RTSI -P inflation:CPI" << std::endl;
+        std::cout << std::endl;
+        std::cout << "Note: Command-line -P overrides saved portfolio parameters." << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "source") {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: source" << std::endl;
-        std::cout << "Manage data sources" << std::endl << std::endl;
+        std::cout << "Manage data sources" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
         std::cout << "  list                    List all data sources" << std::endl;
         std::cout << std::endl;
 
+        std::cout << "OPTIONS:" << std::endl;
+        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "  --db-path PATH          Database file path" << std::endl;
+        std::cout << std::endl;
+
         std::cout << "EXAMPLES:" << std::endl;
         std::cout << "  portfolio source list" << std::endl;
+        std::cout << "  portfolio source list --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "plugin") {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: plugin" << std::endl;
-        std::cout << "Manage system plugins" << std::endl << std::endl;
+        std::cout << "Manage system plugins" << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
         std::cout << "  list [TYPE]             List plugins (database, strategy)" << std::endl;
@@ -487,10 +575,11 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  portfolio plugin list" << std::endl;
         std::cout << "  portfolio plugin list database" << std::endl;
         std::cout << "  portfolio plugin list strategy" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
 
     } else {
         std::cout << "Unknown help topic: " << topic << std::endl;
-        std::cout << "Available topics: portfolio, strategy, source, plugin" << std::endl;
+        std::cout << "Available topics: load, instrument, portfolio, strategy, source, plugin" << std::endl;
     }
 
     std::cout << std::endl;
@@ -623,15 +712,136 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentList(
 
     return {};
 }
-
 std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const ParsedCommand& cmd)
 {
+    // ════════════════════════════════════════════════════════════════════════
+    // Инициализация базы данных из опций командной строки
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string dbType = "InMemory";
+    std::string dbPath;
+
+    if (cmd.options.count("db")) {
+        dbType = cmd.options.at("db").as<std::string>();
+    }
+
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
+    }
+
+    // Инициализируем базу данных если необходимо
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение ID инструмента
+    // ════════════════════════════════════════════════════════════════════════
+
     auto idResult = getRequiredOption<std::string>(cmd, "instrument-id");
     if (!idResult) {
         return std::unexpected(idResult.error());
     }
 
-    std::cout << "Instrument: " << idResult.value() << " (details not yet implemented)" << std::endl;
+    std::string instrumentId = idResult.value();
+
+    if (!database_) {
+        return std::unexpected("Database not initialized");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение информации об инструменте
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto instrumentInfo = database_->getInstrument(instrumentId);
+    if (!instrumentInfo) {
+        return std::unexpected(instrumentInfo.error());
+    }
+
+    const auto& info = instrumentInfo.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение списка атрибутов
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto attributesResult = database_->listInstrumentAttributes(instrumentId);
+    if (!attributesResult) {
+        return std::unexpected(attributesResult.error());
+    }
+
+    const auto& attributes = attributesResult.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод информации
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::cout << "\n" << std::string(80, '=') << std::endl;
+    std::cout << "INSTRUMENT: " << info.id << std::endl;
+    std::cout << std::string(80, '=') << std::endl;
+
+    std::cout << "Name:   " << info.name << std::endl;
+    std::cout << "Type:   " << info.type << std::endl;
+    std::cout << "Source: " << info.source << std::endl;
+    std::cout << std::endl;
+
+    if (attributes.empty()) {
+        std::cout << "No attributes loaded for this instrument." << std::endl;
+        std::cout << std::string(80, '=') << std::endl << std::endl;
+        return {};
+    }
+
+    // Вывод статистики
+    std::size_t totalValues = 0;
+    for (const auto& attr : attributes) {
+        totalValues += attr.valueCount;
+    }
+
+    std::cout << "Total attributes: " << attributes.size() << std::endl;
+    std::cout << "Total values:     " << totalValues << std::endl;
+    std::cout << std::endl;
+
+    // Вывод таблицы атрибутов
+    std::cout << std::string(80, '─') << std::endl;
+    std::cout << std::left
+              << std::setw(20) << "Attribute"
+              << std::setw(15) << "Source"
+              << std::setw(12) << "Values"
+              << std::setw(20) << "First Date"
+              << std::setw(20) << "Last Date"
+              << std::endl;
+    std::cout << std::string(80, '─') << std::endl;
+
+    for (const auto& attr : attributes) {
+        // Форматируем даты
+        auto firstTime = std::chrono::system_clock::to_time_t(attr.firstTimestamp);
+        auto lastTime = std::chrono::system_clock::to_time_t(attr.lastTimestamp);
+
+        std::tm firstTm = *std::localtime(&firstTime);
+        std::tm lastTm = *std::localtime(&lastTime);
+
+        std::stringstream firstDateStream;
+        std::stringstream lastDateStream;
+
+        firstDateStream << std::put_time(&firstTm, "%Y-%m-%d");
+        lastDateStream << std::put_time(&lastTm, "%Y-%m-%d");
+
+        std::cout << std::left
+                  << std::setw(20) << attr.name
+                  << std::setw(15) << attr.source
+                  << std::setw(12) << attr.valueCount
+                  << std::setw(20) << firstDateStream.str()
+                  << std::setw(20) << lastDateStream.str()
+                  << std::endl;
+    }
+
+    std::cout << std::string(80, '─') << std::endl << std::endl;
+
+    // Дополнительная информация
+    std::cout << "TIP: Use 'portfolio load' to add more attributes" << std::endl;
+    std::cout << "     Use 'portfolio strategy execute' to backtest with this instrument" << std::endl;
+    std::cout << std::string(80, '=') << std::endl << std::endl;
+
     return {};
 }
 

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <algorithm>
 
 namespace portfolio {
 
@@ -11,8 +12,8 @@ namespace portfolio {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<void, std::string> BuyHoldStrategy::initializeStrategy(
-    TradingContext& context,
-    const PortfolioParams& params)
+    TradingContext& /* context */,
+    const PortfolioParams& /* params */)
 {
     // ════════════════════════════════════════════════════════════════════════
     // BuyHold: не требует специальной инициализации
@@ -199,6 +200,20 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     }
 
     double price = priceIt->second;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Проверяем делистинг: не покупаем в последний день данных
+    // ════════════════════════════════════════════════════════════════════════
+
+    const auto& prices = context.priceData[instrumentId];
+    auto maxDateIt = std::max_element(
+        prices.begin(), prices.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    if (maxDateIt != prices.end() && maxDateIt->first == context.currentDate) {
+        // Это последний день данных (делистинг) - не покупаем
+        return result;
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     // Получаем целевой вес инструмента

@@ -155,19 +155,32 @@ TEST_F(RefactoredBuyHoldTest, BacktestWithMultipleDividendPayments) {
     std::vector<double> prices(100, 100.0);
     addInstrumentData("SBER", "Sberbank", prices);
 
-    // Квартальные дивиденды
-    addDividend("SBER", 25, 10.0);
-    addDividend("SBER", 50, 10.0);
-    addDividend("SBER", 75, 10.0);
-    addDividend("SBER", 90, 10.0);
+    // Квартальные дивиденды - в пределах периода бэктеста (0-10 дней)
+    addDividend("SBER", 2, 10.0);
+    addDividend("SBER", 4, 10.0);
+    addDividend("SBER", 6, 10.0);
+    addDividend("SBER", 8, 10.0);
 
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
 
     auto metrics = *result;
+
+    // Дивиденды реинвестируются автоматически (Buy&Hold поведение)
+    // День 2: $10 × 1000 = $10,000 → покупка 100 → всего 1100
+    // День 4: $10 × 1100 = $11,000 → покупка 110 → всего 1210
+    // День 6: $10 × 1210 = $12,100 → покупка 121 → всего 1331
+    // День 8: $10 × 1331 = $13,310 → покупка 133 → всего 1464
+    // Итого дивидендов: $46,410 (с учетом реинвестирования)
+
     EXPECT_EQ(metrics.dividendPayments, 4) << "Should have 4 dividend payments";
-    EXPECT_NEAR(metrics.totalDividends, 40000.0, 500.0);
+    EXPECT_NEAR(metrics.totalDividends, 46410.0, 50.0)
+        << "Total dividends with reinvestment";
+
+    // Проверяем финальную стоимость
+    // $100,000 + $46,410 (дивиденды) = $146,410
+    EXPECT_NEAR(metrics.finalValue, 146410.0, 50.0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -176,43 +189,43 @@ TEST_F(RefactoredBuyHoldTest, BacktestWithMultipleDividendPayments) {
 
 TEST_F(RefactoredBuyHoldTest, NoRebalancingByDefault) {
     auto params = createParams({"GAZP"});
-    
+
     // Проверяем параметр по умолчанию
     EXPECT_EQ(params.getParameter("rebalance_period"), "0");
-    
+
     std::vector<double> prices = {100, 110, 90, 105, 95, 100, 105, 110, 115, 120};
     addInstrumentData("GAZP", "Gazprom", prices);
 
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    
+
     // BuyHold без ребалансировки просто держит купленные акции до конца
 }
 
 TEST_F(RefactoredBuyHoldTest, RebalancingSellsExcess) {
     auto params = createParams({"GAZP", "SBER"});
     params.setParameter("rebalance_period", "5");  // Ребалансировка каждые 5 дней
-    
+
     // GAZP растет быстрее
     std::vector<double> gazpPrices = {100, 105, 110, 115, 120, 125, 130, 135, 140, 145};
     // SBER стагнирует
     std::vector<double> sberPrices = {100, 100, 100, 100, 100, 100, 100, 100, 100, 100};
-    
+
     addInstrumentData("GAZP", "Gazprom", gazpPrices);
     addInstrumentData("SBER", "Sberbank", sberPrices);
 
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    
+
     // При ребалансировке должен продать часть переросшего GAZP
     // и купить SBER для восстановления весов 50/50
 }
 
 TEST_F(RefactoredBuyHoldTest, IntegerSharesOnly) {
     auto params = createParams({"GAZP"});
-    
+
     // Цена $101 - чтобы получить дробное количество акций
     std::vector<double> prices(10, 101.0);
     addInstrumentData("GAZP", "Gazprom", prices);
@@ -220,39 +233,39 @@ TEST_F(RefactoredBuyHoldTest, IntegerSharesOnly) {
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    
+
     // Должно купить floor(100000 / 101) = 990 акций
     // Остаток ~$10 должен остаться в кэше
 }
 
 TEST_F(RefactoredBuyHoldTest, FreeCashRedistribution) {
     auto params = createParams({"GAZP", "SBER"});
-    
+
     std::vector<double> gazpPrices(100, 100.0);
     std::vector<double> sberPrices(100, 100.0);
-    
+
     addInstrumentData("GAZP", "Gazprom", gazpPrices);
     addInstrumentData("SBER", "Sberbank", sberPrices);
-    
+
     // Добавляем дивиденды на 50-й день от GAZP
     addDividend("GAZP", 50, 5.0);
 
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    
+
     // После дивидендов должен перераспределить свободный кэш
     // с минимизацией перекоса весов
 }
 
 TEST_F(RefactoredBuyHoldTest, WeightRebalancingWithUnequalWeights) {
     auto params = createParams({"GAZP", "SBER", "LKOH"});
-    
+
     // Устанавливаем неравные веса
     params.weights["GAZP"] = 0.5;
     params.weights["SBER"] = 0.3;
     params.weights["LKOH"] = 0.2;
-    
+
     std::vector<double> prices(10, 100.0);
     addInstrumentData("GAZP", "Gazprom", prices);
     addInstrumentData("SBER", "Sberbank", prices);
@@ -261,7 +274,7 @@ TEST_F(RefactoredBuyHoldTest, WeightRebalancingWithUnequalWeights) {
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    
+
     // Должны быть куплены акции пропорционально весам:
     // GAZP: ~500 акций ($50000)
     // SBER: ~300 акций ($30000)
@@ -286,7 +299,7 @@ TEST_F(RefactoredBuyHoldTest, HandlesDelistingCorrectly) {
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    
+
     // Стратегия должна продать GAZP при делистинге и оставить средства в кеше
     // SBER должен оставаться до конца периода
 }
@@ -337,7 +350,7 @@ TEST_F(RefactoredBuyHoldTest, StrategyMetadata) {
 
 TEST_F(RefactoredBuyHoldTest, DefaultParameters) {
     auto defaults = strategy->getDefaultParameters();
-    
+
     EXPECT_TRUE(defaults.count("calendar"));
     EXPECT_TRUE(defaults.count("rebalance_period"));
     EXPECT_EQ(defaults["rebalance_period"], "0");

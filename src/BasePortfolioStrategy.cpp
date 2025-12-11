@@ -5,9 +5,22 @@
 #include <cmath>
 #include <numeric>
 #include <algorithm>
-#include <ctime>
 
 namespace portfolio {
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// УСТАНОВКА ЗАВИСИМОСТЕЙ
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void BasePortfolioStrategy::setDatabase(std::shared_ptr<IPortfolioDatabase> db)
+{
+    database_ = std::move(db);
+}
+
+void BasePortfolioStrategy::setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc)
+{
+    taxCalculator_ = std::move(taxCalc);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ШАБЛОННЫЙ МЕТОД BACKTEST
@@ -208,16 +221,19 @@ bool BasePortfolioStrategy::isRebalanceDay(
 // Убирает время, оставляя только дату
 TimePoint BasePortfolioStrategy::normalizeToDate(const TimePoint& timestamp) const
 {
-    auto timeT = std::chrono::system_clock::to_time_t(timestamp);
-    std::tm tm = *std::gmtime(&timeT);
+    using namespace std::chrono;
 
-    // Обнуляем время (часы, минуты, секунды)
-    tm.tm_hour = 0;
-    tm.tm_min = 0;
-    tm.tm_sec = 0;
+    // Получаем количество секунд с эпохи Unix
+    auto timeT = system_clock::to_time_t(timestamp);
 
-    auto normalizedTimeT = std::mktime(&tm);
-    return std::chrono::system_clock::from_time_t(normalizedTimeT);
+    // Вычисляем количество полных дней (целочисленное деление)
+    // Это безопасно и не требует gmtime/localtime
+    auto days = timeT / (24 * 3600);
+
+    // Возвращаем начало дня (полночь)
+    auto normalizedTimeT = days * (24 * 3600);
+
+    return system_clock::from_time_t(normalizedTimeT);
 }
 
 std::expected<double, std::string> BasePortfolioStrategy::getPrice(
@@ -599,39 +615,67 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         std::vector<double> dailyReturns;
         dailyReturns.reserve(dailyValues.size() - 1);
 
-        for (std::size_t i = 1; i < dailyValues.size(); ++i) {
-            double dailyReturn = (dailyValues[i] - dailyValues[i-1]) / dailyValues[i-1];
-            dailyReturns.push_back(dailyReturn);
+        // Начинаем с первого дня, где portfolioValue уже значителен
+        // Пропускаем дни с portfolioValue < 1% от initialCapital (возможно только остаток cash)
+        std::size_t startIdx = 0;
+        for (std::size_t i = 0; i < dailyValues.size(); ++i) {
+            if (dailyValues[i] >= initialCapital * 0.01) {
+                startIdx = i;
+                break;
+            }
         }
 
-        double meanReturn = std::accumulate(
-                                dailyReturns.begin(), dailyReturns.end(), 0.0) / static_cast<double>(dailyReturns.size());
-
-        double variance = 0.0;
-        for (double r : dailyReturns) {
-            variance += std::pow(r - meanReturn, 2);
+        for (std::size_t i = startIdx + 1; i < dailyValues.size(); ++i) {
+            if (dailyValues[i-1] > 0) {  // Защита от деления на ноль
+                double dailyReturn = (dailyValues[i] - dailyValues[i-1]) / dailyValues[i-1];
+                dailyReturns.push_back(dailyReturn);
+            }
         }
-        variance /= static_cast<double>(dailyReturns.size());
 
-        double dailyVolatility = std::sqrt(variance);
-        result.volatility = dailyVolatility * std::sqrt(252.0) * 100.0;
+        if (dailyReturns.size() > 1) {
+            double meanReturn = std::accumulate(
+                                    dailyReturns.begin(), dailyReturns.end(), 0.0) / static_cast<double>(dailyReturns.size());
+
+            double variance = 0.0;
+            for (double r : dailyReturns) {
+                variance += std::pow(r - meanReturn, 2);
+            }
+            variance /= static_cast<double>(dailyReturns.size());
+
+            double dailyVolatility = std::sqrt(variance);
+            result.volatility = dailyVolatility * std::sqrt(252.0) * 100.0;
+        }
     }
 
     // Максимальная просадка
-    double peak = dailyValues.front();
-    double maxDrawdownValue = 0.0;
-
-    for (double value : dailyValues) {
-        if (value > peak) {
-            peak = value;
-        }
-        double drawdown = (peak - value) / peak;
-        if (drawdown > maxDrawdownValue) {
-            maxDrawdownValue = drawdown;
+    // Начинаем с первого дня, где portfolioValue значителен
+    std::size_t startIdx = 0;
+    for (std::size_t i = 0; i < dailyValues.size(); ++i) {
+        if (dailyValues[i] >= initialCapital * 0.01) {
+            startIdx = i;
+            break;
         }
     }
 
-    result.maxDrawdown = maxDrawdownValue * 100.0;
+    if (startIdx < dailyValues.size()) {
+        double peak = dailyValues[startIdx];
+        double maxDrawdownValue = 0.0;
+
+        for (std::size_t i = startIdx; i < dailyValues.size(); ++i) {
+            double value = dailyValues[i];
+            if (value > peak) {
+                peak = value;
+            }
+            if (peak > 0) {  // Защита от деления на ноль
+                double drawdown = (peak - value) / peak;
+                if (drawdown > maxDrawdownValue) {
+                    maxDrawdownValue = drawdown;
+                }
+            }
+        }
+
+        result.maxDrawdown = maxDrawdownValue * 100.0;
+    }
 
     // Sharpe Ratio (если есть данные)
     if (params.hasParameter("risk_free_rate")) {

@@ -58,15 +58,14 @@ struct TradeResult {
 
 class BasePortfolioStrategy : public IPortfolioStrategy {
 public:
+    // Конструктор по умолчанию
+    BasePortfolioStrategy() = default;
+
     ~BasePortfolioStrategy() override = default;
 
-    void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override {
-        database_ = db;
-    }
-
-    void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override {
-        taxCalculator_ = taxCalc;
-    }
+    // Объявления методов установки (реализация в .cpp)
+    void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override;
+    void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override;
 
     BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
     BasePortfolioStrategy& operator=(const BasePortfolioStrategy&) = delete;
@@ -82,7 +81,6 @@ public:
         double initialCapital) override final;
 
 protected:
-    BasePortfolioStrategy() = default;
 
     // ════════════════════════════════════════════════════════════════════════
     // Виртуальные методы для переопределения в наследниках
@@ -180,9 +178,9 @@ protected:
     // Защищенные члены класса
     // ════════════════════════════════════════════════════════════════════════
 
-    std::shared_ptr<IPortfolioDatabase> database_;
-    std::shared_ptr<TaxCalculator> taxCalculator_;
-    std::unique_ptr<TradingCalendar> calendar_;
+    std::shared_ptr<IPortfolioDatabase> database_ = nullptr;
+    std::shared_ptr<TaxCalculator> taxCalculator_ = nullptr;
+    std::unique_ptr<TradingCalendar> calendar_ = nullptr;
 
     // Хранилище налоговых лотов
     std::map<std::string, std::vector<TaxLot>> instrumentLots_;

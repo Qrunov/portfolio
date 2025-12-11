@@ -18,7 +18,7 @@ using json = nlohmann::json;
 struct PortfolioInfo {
     std::string name;
     std::string description;
-    double initialCapital = 0.0;
+    double initialCapital = 0.0; //TODO: перенести initialCapital в parameters
     std::vector<std::string> instruments;
     std::map<std::string, double> weights;
     std::string createdDate;

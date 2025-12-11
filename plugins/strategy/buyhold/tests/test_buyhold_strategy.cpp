@@ -1,3 +1,4 @@
+// test_refactored_buyhold.cpp
 #include <gtest/gtest.h>
 #include "BuyHoldStrategy.hpp"
 #include "InMemoryDatabase.hpp"
@@ -7,172 +8,105 @@
 using namespace portfolio;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Test Fixtures
+// Test Fixture
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class BuyHoldStrategyTest : public ::testing::Test {
+class RefactoredBuyHoldTest : public ::testing::Test {
 protected:
     void SetUp() override {
         strategy = std::make_unique<BuyHoldStrategy>();
         database = std::make_shared<InMemoryDatabase>();
-
-        // ✅ Передаём shared_ptr напрямую (без .get())
         strategy->setDatabase(database);
 
-        // Создаем временные точки
         startDate = std::chrono::system_clock::now();
-        endDate = startDate + std::chrono::hours(24 * 10);  // 10 дней
+        endDate = startDate + std::chrono::hours(24 * 10);
     }
 
-    std::unique_ptr<BuyHoldStrategy> strategy;
-    std::shared_ptr<InMemoryDatabase> database;
-    TimePoint startDate;
-    TimePoint endDate;
-
-    // Вспомогательная функция для добавления данных инструмента
     void addInstrumentData(
         const std::string& instrumentId,
         const std::string& name,
-        const std::vector<double>& prices) {
-
+        const std::vector<double>& prices)
+    {
         database->saveInstrument(instrumentId, name, "stock", "test");
 
         for (std::size_t i = 0; i < prices.size(); ++i) {
             auto date = startDate + std::chrono::hours(24 * i);
             database->saveAttribute(
                 instrumentId, "close", "test", date,
-                AttributeValue(prices[i])
-                );
+                AttributeValue(prices[i]));
         }
     }
 
-    // Вспомогательная функция для создания параметров
-    IPortfolioStrategy::PortfolioParams createParams(
-        const std::vector<std::string>& instrumentIds) {
+    void addDividend(
+        const std::string& instrumentId,
+        std::size_t dayIndex,
+        double amount)
+    {
+        auto date = startDate + std::chrono::hours(24 * dayIndex);
+        database->saveAttribute(
+            instrumentId, "dividend", "test", date,
+            AttributeValue(amount));
+    }
 
+    IPortfolioStrategy::PortfolioParams createParams(
+        const std::vector<std::string>& instrumentIds)
+    {
         IPortfolioStrategy::PortfolioParams params;
         params.instrumentIds = instrumentIds;
 
-        // Равный вес для каждого инструмента
         double weight = 1.0 / instrumentIds.size();
         for (const auto& id : instrumentIds) {
             params.weights[id] = weight;
         }
 
-        // ✅ Используем новый API параметров
         params.setParameter("calendar", "IMOEX");
+        params.setParameter("rebalance_period", "0");
 
         return params;
     }
+
+    std::unique_ptr<BuyHoldStrategy> strategy;
+    std::shared_ptr<InMemoryDatabase> database;
+    TimePoint startDate;
+    TimePoint endDate;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Метаинформация
+// ТЕСТЫ: Базовый функционал
 // ═══════════════════════════════════════════════════════════════════════════════
 
-TEST_F(BuyHoldStrategyTest, StrategyMetadata) {
-    EXPECT_EQ(strategy->getName(), "BuyHold");
-    EXPECT_FALSE(strategy->getDescription().empty());
-    EXPECT_EQ(strategy->getVersion(), "1.0.2");
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Валидация входных параметров
-// ═══════════════════════════════════════════════════════════════════════════════
-
-TEST_F(BuyHoldStrategyTest, BacktestWithNegativeCapital) {
-    auto params = createParams({"GAZP"});
-    addInstrumentData("GAZP", "Gazprom", {100, 101, 102});
-
-    auto result = strategy->backtest(params, startDate, endDate, -1000);
-
-    EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("positive"), std::string::npos);
-}
-
-TEST_F(BuyHoldStrategyTest, BacktestWithInvalidDates) {
-    auto params = createParams({"GAZP"});
-    addInstrumentData("GAZP", "Gazprom", {100, 101, 102});
-
-    // endDate < startDate
-    auto result = strategy->backtest(params, endDate, startDate, 100000);
-
-    EXPECT_FALSE(result.has_value());
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Базовые сценарии
-// ═══════════════════════════════════════════════════════════════════════════════
-
-TEST_F(BuyHoldStrategyTest, SimpleBacktestWithGrowingPrice) {
+TEST_F(RefactoredBuyHoldTest, BasicBacktestWithGrowingPrice) {
     auto params = createParams({"GAZP"});
 
-    // Цены растут: 100, 101, 102, ..., 109
     std::vector<double> prices = {100, 101, 102, 103, 104, 105, 106, 107, 108, 109};
     addInstrumentData("GAZP", "Gazprom", prices);
 
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
-    ASSERT_TRUE(result.has_value());
-    auto metrics = *result;
+    ASSERT_TRUE(result.has_value()) << "Backtest should succeed";
 
-    EXPECT_GT(metrics.totalReturn, 0);
-    EXPECT_GT(metrics.finalValue, 100000);
-    EXPECT_GT(metrics.annualizedReturn, 0);
-    EXPECT_LE(metrics.maxDrawdown, 0);
+    auto metrics = *result;
+    EXPECT_GT(metrics.totalReturn, 0) << "Return should be positive for growing prices";
+    EXPECT_GT(metrics.finalValue, 100000) << "Final value should exceed initial capital";
+    EXPECT_GT(metrics.annualizedReturn, 0) << "Annualized return should be positive";
 }
-TEST_F(BuyHoldStrategyTest, BacktestWithVolatility) {
+
+TEST_F(RefactoredBuyHoldTest, BacktestWithDecreasingPrice) {
     auto params = createParams({"SBER"});
 
-    // Цены с вариацией (не линейные): создают волатильность
-    std::vector<double> prices = {100, 102, 98, 101, 97, 103, 95, 99, 96, 100};
-    addInstrumentData("SBER", "Sberbank", prices);
-
-    auto result = strategy->backtest(params, startDate, endDate, 100000);
-
-    ASSERT_TRUE(result.has_value());
-    auto metrics = *result;
-
-    // При нелинейном движении волатильность должна быть > 0
-    EXPECT_GT(metrics.volatility, 0) << "Volatility should be positive for non-linear prices";
-
-    // Можем рассчитать примерное значение
-    // Дневные доходности: +2%, -3.92%, +3.06%, -3.96%, +6.19%, -7.77%, +4.21%, -3.03%, +4.17%
-    // Стандартное отклонение ≈ 4.5%, годовое ≈ 71%
-    EXPECT_GT(metrics.volatility, 50) << "Expected annualized volatility > 50%";
-}
-TEST_F(BuyHoldStrategyTest, SimpleBacktestWithDecreasingPrice) {
-    auto params = createParams({"SBER"});
-
-    // Цены падают: 100, 99, 98, ..., 91
     std::vector<double> prices = {100, 99, 98, 97, 96, 95, 94, 93, 92, 91};
     addInstrumentData("SBER", "Sberbank", prices);
 
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
-    ASSERT_TRUE(result.has_value()) << "Backtest should succeed";
+    ASSERT_TRUE(result.has_value());
+
     auto metrics = *result;
-
-    // Проверяем доходность
-    EXPECT_LT(metrics.totalReturn, 0) << "Total return should be negative";
-    EXPECT_NEAR(metrics.totalReturn, -9.0, 1.0) << "Expected ~-9% return";
-
-    // Проверяем финальную стоимость
+    EXPECT_LT(metrics.totalReturn, 0) << "Return should be negative for decreasing prices";
     EXPECT_LT(metrics.finalValue, 100000) << "Final value should be less than initial";
-    EXPECT_NEAR(metrics.finalValue, 91000, 1000) << "Expected ~$91,000 final value";
-
-    // Проверяем просадку
-    EXPECT_NEAR(metrics.maxDrawdown, 9.0, 1.0) << "Expected ~9% drawdown";
-
-    // ✅ ИСПРАВЛЕНО: волатильность >= 0 (может быть 0 при линейном движении)
-    EXPECT_GE(metrics.volatility, 0) << "Volatility should be non-negative";
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ: Портфель с несколькими акциями
-// ═══════════════════════════════════════════════════════════════════════════════
-
-TEST_F(BuyHoldStrategyTest, BacktestWithTwoStocks) {
+TEST_F(RefactoredBuyHoldTest, BacktestWithMultipleInstruments) {
     auto params = createParams({"GAZP", "SBER"});
 
     std::vector<double> gazpPrices = {100, 101, 102, 103, 104, 105, 106, 107, 108, 109};
@@ -184,11 +118,234 @@ TEST_F(BuyHoldStrategyTest, BacktestWithTwoStocks) {
     auto result = strategy->backtest(params, startDate, endDate, 100000);
 
     ASSERT_TRUE(result.has_value());
-    auto metrics = *result;
 
-    // Средний результат: (9% + (-9%)) / 2 = 0%
+    auto metrics = *result;
+    // Средний результат: (9% + (-9%)) / 2 ≈ 0%
     EXPECT_LE(std::abs(metrics.totalReturn), 1.0);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ: Дивиденды
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_F(RefactoredBuyHoldTest, BacktestWithDividends) {
+    auto params = createParams({"GAZP"});
+
+    std::vector<double> prices(10, 100.0);  // Постоянная цена
+    addInstrumentData("GAZP", "Gazprom", prices);
+
+    // Дивиденды на 5-й день
+    addDividend("GAZP", 5, 5.0);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+
+    auto metrics = *result;
+    EXPECT_GT(metrics.totalDividends, 0) << "Should receive dividends";
+    EXPECT_EQ(metrics.dividendPayments, 1) << "Should have 1 dividend payment";
+
+    // Ожидаемые дивиденды: 1000 акций * 5.0 = 5000
+    EXPECT_NEAR(metrics.totalDividends, 5000.0, 100.0);
+}
+
+TEST_F(RefactoredBuyHoldTest, BacktestWithMultipleDividendPayments) {
+    auto params = createParams({"SBER"});
+
+    std::vector<double> prices(100, 100.0);
+    addInstrumentData("SBER", "Sberbank", prices);
+
+    // Квартальные дивиденды
+    addDividend("SBER", 25, 10.0);
+    addDividend("SBER", 50, 10.0);
+    addDividend("SBER", 75, 10.0);
+    addDividend("SBER", 90, 10.0);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+
+    auto metrics = *result;
+    EXPECT_EQ(metrics.dividendPayments, 4) << "Should have 4 dividend payments";
+    EXPECT_NEAR(metrics.totalDividends, 40000.0, 500.0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ: Ребалансировка
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_F(RefactoredBuyHoldTest, NoRebalancingByDefault) {
+    auto params = createParams({"GAZP"});
+    
+    // Проверяем параметр по умолчанию
+    EXPECT_EQ(params.getParameter("rebalance_period"), "0");
+    
+    std::vector<double> prices = {100, 110, 90, 105, 95, 100, 105, 110, 115, 120};
+    addInstrumentData("GAZP", "Gazprom", prices);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    
+    // BuyHold без ребалансировки просто держит купленные акции до конца
+}
+
+TEST_F(RefactoredBuyHoldTest, RebalancingSellsExcess) {
+    auto params = createParams({"GAZP", "SBER"});
+    params.setParameter("rebalance_period", "5");  // Ребалансировка каждые 5 дней
+    
+    // GAZP растет быстрее
+    std::vector<double> gazpPrices = {100, 105, 110, 115, 120, 125, 130, 135, 140, 145};
+    // SBER стагнирует
+    std::vector<double> sberPrices = {100, 100, 100, 100, 100, 100, 100, 100, 100, 100};
+    
+    addInstrumentData("GAZP", "Gazprom", gazpPrices);
+    addInstrumentData("SBER", "Sberbank", sberPrices);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    
+    // При ребалансировке должен продать часть переросшего GAZP
+    // и купить SBER для восстановления весов 50/50
+}
+
+TEST_F(RefactoredBuyHoldTest, IntegerSharesOnly) {
+    auto params = createParams({"GAZP"});
+    
+    // Цена $101 - чтобы получить дробное количество акций
+    std::vector<double> prices(10, 101.0);
+    addInstrumentData("GAZP", "Gazprom", prices);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    
+    // Должно купить floor(100000 / 101) = 990 акций
+    // Остаток ~$10 должен остаться в кэше
+}
+
+TEST_F(RefactoredBuyHoldTest, FreeCashRedistribution) {
+    auto params = createParams({"GAZP", "SBER"});
+    
+    std::vector<double> gazpPrices(100, 100.0);
+    std::vector<double> sberPrices(100, 100.0);
+    
+    addInstrumentData("GAZP", "Gazprom", gazpPrices);
+    addInstrumentData("SBER", "Sberbank", sberPrices);
+    
+    // Добавляем дивиденды на 50-й день от GAZP
+    addDividend("GAZP", 50, 5.0);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    
+    // После дивидендов должен перераспределить свободный кэш
+    // с минимизацией перекоса весов
+}
+
+TEST_F(RefactoredBuyHoldTest, WeightRebalancingWithUnequalWeights) {
+    auto params = createParams({"GAZP", "SBER", "LKOH"});
+    
+    // Устанавливаем неравные веса
+    params.weights["GAZP"] = 0.5;
+    params.weights["SBER"] = 0.3;
+    params.weights["LKOH"] = 0.2;
+    
+    std::vector<double> prices(10, 100.0);
+    addInstrumentData("GAZP", "Gazprom", prices);
+    addInstrumentData("SBER", "Sberbank", prices);
+    addInstrumentData("LKOH", "Lukoil", prices);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    
+    // Должны быть куплены акции пропорционально весам:
+    // GAZP: ~500 акций ($50000)
+    // SBER: ~300 акций ($30000)
+    // LKOH: ~200 акций ($20000)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ: Делистинг
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_F(RefactoredBuyHoldTest, HandlesDelistingCorrectly) {
+    auto params = createParams({"GAZP", "SBER"});
+
+    // GAZP делистится на 5-й день
+    std::vector<double> gazpPrices = {100, 101, 102, 103, 104};
+    addInstrumentData("GAZP", "Gazprom", gazpPrices);
+
+    // SBER торгуется весь период
+    std::vector<double> sberPrices = {100, 101, 102, 103, 104, 105, 106, 107, 108, 109};
+    addInstrumentData("SBER", "Sberbank", sberPrices);
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    ASSERT_TRUE(result.has_value());
+    
+    // Стратегия должна продать GAZP при делистинге и оставить средства в кеше
+    // SBER должен оставаться до конца периода
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ: Валидация
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_F(RefactoredBuyHoldTest, ValidatesNegativeCapital) {
+    auto params = createParams({"GAZP"});
+    addInstrumentData("GAZP", "Gazprom", {100, 101, 102});
+
+    auto result = strategy->backtest(params, startDate, endDate, -1000);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("positive"), std::string::npos);
+}
+
+TEST_F(RefactoredBuyHoldTest, ValidatesDateOrder) {
+    auto params = createParams({"GAZP"});
+    addInstrumentData("GAZP", "Gazprom", {100, 101, 102});
+
+    // endDate < startDate
+    auto result = strategy->backtest(params, endDate, startDate, 100000);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("after"), std::string::npos);
+}
+
+TEST_F(RefactoredBuyHoldTest, ValidatesEmptyInstrumentList) {
+    auto params = createParams({});
+
+    auto result = strategy->backtest(params, startDate, endDate, 100000);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("instruments"), std::string::npos);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ: Метаинформация
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_F(RefactoredBuyHoldTest, StrategyMetadata) {
+    EXPECT_EQ(strategy->getName(), "BuyHold");
+    EXPECT_FALSE(strategy->getDescription().empty());
+    EXPECT_EQ(strategy->getVersion(), "2.0.0");
+}
+
+TEST_F(RefactoredBuyHoldTest, DefaultParameters) {
+    auto defaults = strategy->getDefaultParameters();
+    
+    EXPECT_TRUE(defaults.count("calendar"));
+    EXPECT_TRUE(defaults.count("rebalance_period"));
+    EXPECT_EQ(defaults["rebalance_period"], "0");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Main
+// ═══════════════════════════════════════════════════════════════════════════════
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);

@@ -467,7 +467,7 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  portfolio instrument delete -t SBER" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
-    } else if (topic == "portfolio") {
+    } else if (topic == "portfolio") { //TODO: для portfolio для add-instrument, remove-instrument описаны не все опции
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: portfolio" << std::endl;
         std::cout << "Manage investment portfolios" << std::endl;

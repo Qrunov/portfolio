@@ -24,12 +24,12 @@ public:
     // dateSource: строка-описание источника даты (для CSV - индекс столбца)
     virtual Result initialize(
         std::string_view dataLocation,
-        std::string_view dateSource) = 0;
+        std::string_view dateSource) = 0; //TODO источник даты следует добавлять через addAttributeRequest
 
     // Добавить запрос на атрибут
     // attributeName: имя атрибута ("close", "volume", и т.д.)
     // attributeSource: строка-описание источника данных (для CSV - индекс столбца)
-    virtual Result addAttributeRequest(
+    virtual Result addAttributeRequest( //REMIND Здесь надо видимо хорошо подходит паттерн Строитель
         std::string_view attributeName,
         std::string_view attributeSource) = 0;
 

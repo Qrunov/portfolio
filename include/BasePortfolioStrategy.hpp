@@ -1,4 +1,4 @@
-// include/BasePortfolioStrategy.hpp
+// BasePortfolioStrategy.hpp
 #pragma once
 
 #include "IPortfolioStrategy.hpp"
@@ -13,6 +13,48 @@
 #include <iostream>
 
 namespace portfolio {
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Структура для хранения дивидендов
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct DividendPayment {
+    TimePoint date;
+    double amount;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Контекст торговой операции
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct TradingContext {
+    TimePoint currentDate;
+    std::size_t dayIndex;
+    bool isRebalanceDay;
+    bool isLastDay;
+    double cashBalance;
+    std::map<std::string, double> holdings;
+    std::map<std::string, std::map<TimePoint, double>> priceData;
+    std::map<std::string, std::vector<DividendPayment>> dividendData;
+    std::map<std::string, std::vector<TaxLot>> taxLots;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Результат торговой операции
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct TradeResult {
+    double sharesTraded;
+    double price;
+    double totalAmount;
+    std::string reason;
+
+    TradeResult() : sharesTraded(0.0), price(0.0), totalAmount(0.0) {}
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Базовый класс стратегии портфеля
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class BasePortfolioStrategy : public IPortfolioStrategy {
 public:
@@ -29,19 +71,90 @@ public:
     BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
     BasePortfolioStrategy& operator=(const BasePortfolioStrategy&) = delete;
 
+    // ════════════════════════════════════════════════════════════════════════
+    // ШАБЛОННЫЙ МЕТОД BACKTEST (Template Method Pattern)
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::expected<BacktestResult, std::string> backtest(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) override final;
+
 protected:
     BasePortfolioStrategy() = default;
 
-    std::shared_ptr<IPortfolioDatabase> database_;
-    std::shared_ptr<TaxCalculator> taxCalculator_;
-    std::unique_ptr<TradingCalendar> calendar_;
+    // ════════════════════════════════════════════════════════════════════════
+    // Виртуальные методы для переопределения в наследниках
+    // ════════════════════════════════════════════════════════════════════════
 
-    // Хранилище налоговых лотов
-    std::map<std::string, std::vector<TaxLot>> instrumentLots_;
+    // Инициализация стратегии (хук для сложных стратегий)
+    virtual std::expected<void, std::string> initializeStrategy(
+        TradingContext& /* context */,
+        const PortfolioParams& /* params */) {
+        return {};
+    }
 
-    // ════════════════════════════════════════════════════════════════════
-    // Параметры по умолчанию (базовые для всех стратегий)
-    // ════════════════════════════════════════════════════════════════════
+    // Продажа активов (чисто виртуальная)
+    virtual std::expected<TradeResult, std::string> sell(
+        const std::string& instrumentId,
+        TradingContext& context,
+        const PortfolioParams& params) = 0;
+
+    // Покупка активов (чисто виртуальная)
+    virtual std::expected<TradeResult, std::string> buy(
+        const std::string& instrumentId,
+        TradingContext& context,
+        const PortfolioParams& params) = 0;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Базовые невиртуальные методы
+    // ════════════════════════════════════════════════════════════════════════
+
+    // Обработка дивидендов (базовая реализация)
+    std::expected<double, std::string> getDividend(
+        const std::string& instrumentId,
+        TradingContext& context);
+
+    // Определение дня ребалансировки
+    bool isRebalanceDay(
+        std::size_t dayIndex,
+        std::size_t rebalancePeriod) const noexcept;
+
+    // Вспомогательные методы для работы с данными
+    std::expected<void, std::string> loadPriceData(
+        const std::vector<std::string>& instrumentIds,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        std::map<std::string, std::map<TimePoint, double>>& priceData);
+
+    std::expected<void, std::string> loadDividendData(
+        const std::vector<std::string>& instrumentIds,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        std::map<std::string, std::vector<DividendPayment>>& dividendData);
+
+/*    std::expected<TimePoint, std::string> adjustDateForBuy(
+         const std::string& instrumentId,
+         const TimePoint& date);
+
+    std::expected<TimePoint, std::string> adjustDateForSell(
+        const std::string& instrumentId,
+        const TimePoint& date);
+*/
+
+    double calculatePortfolioValue(
+        const TradingContext& context) const;
+
+    // Получение цены инструмента на определенную дату
+    std::expected<double, std::string> getPrice(
+        const std::string& instrumentId,
+        const TimePoint& date,
+        const TradingContext& context) const;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Параметры по умолчанию
+    // ════════════════════════════════════════════════════════════════════════
 
     std::map<std::string, std::string> getDefaultParameters() const override {
         std::map<std::string, std::string> defaults;
@@ -59,273 +172,76 @@ protected:
         defaults["lot_method"] = "FIFO";
         defaults["import_losses"] = "0";
 
-        defaults["risk_free_rate"] = "7.0";           // Процент годовых
-        defaults["risk_free_instrument"] = "";        // Инструмент (например, SBMM)
+        // Risk-free rate
+        defaults["risk_free_rate"] = "7.0";
+        defaults["risk_free_instrument"] = "";
+
+        // Rebalance period (in days, 0 = no rebalancing)
+        defaults["rebalance_period"] = "0";
+
         return defaults;
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // Защищенные члены класса
+    // ════════════════════════════════════════════════════════════════════════
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Инициализация торгового календаря
-    // ═════════════════════════════════════════════════════════════════════════
+    std::shared_ptr<IPortfolioDatabase> database_;
+    std::shared_ptr<TaxCalculator> taxCalculator_;
+    std::unique_ptr<TradingCalendar> calendar_;
+
+    // Хранилище налоговых лотов
+    std::map<std::string, std::vector<TaxLot>> instrumentLots_;
+
+private:
+    // ════════════════════════════════════════════════════════════════════════
+    // Приватные методы шаблонного метода
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::expected<void, std::string> validateInputParameters(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
 
     std::expected<void, std::string> initializeTradingCalendar(
         const PortfolioParams& params,
         const TimePoint& startDate,
-        const TimePoint& endDate)
-    {
-        std::string referenceInstrument = params.getParameter("calendar", "IMOEX");
+        const TimePoint& endDate);
 
-        auto calendarResult = TradingCalendar::create(
-            database_, params.instrumentIds, startDate, endDate, referenceInstrument);
-
-        if (!calendarResult) {
-            return std::unexpected("Calendar initialization failed: " + calendarResult.error());
-        }
-        calendar_ = std::move(*calendarResult);
-
-        // Улучшенный вывод
-        std::cout << "✓ Trading calendar initialized" << std::endl;
-        if (calendar_->usedAlternativeReference()) {
-            std::cout << "  Note: Using '" << calendar_->getReferenceInstrument()
-            << "' as reference ('" << referenceInstrument
-            << "' was not available)" << std::endl;
-        }
-
-        return {};
-    }
-
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // Инициализация корректировки инфляции
-    // ═════════════════════════════════════════════════════════════════════════
-
-    std::expected<std::unique_ptr<InflationAdjuster>, std::string>
-    initializeInflationAdjuster(
+    void printBacktestHeader(
         const PortfolioParams& params,
         const TimePoint& startDate,
-        const TimePoint& endDate)
-    {
-        if (!database_) {
-            return std::unexpected("Database not set");
-        }
+        const TimePoint& endDate,
+        double initialCapital) const;
 
-        // Получаем параметр инфляции
-        std::string inflationInstrument = params.getParameter("inflation", "INF");
-
-        auto adjusterResult = InflationAdjuster::create(
-            database_,
-            startDate,
-            endDate,
-            inflationInstrument);
-
-        if (!adjusterResult) {
-            return std::unexpected(
-                "Failed to create inflation adjuster: " + adjusterResult.error());
-        }
-
-        return std::make_unique<InflationAdjuster>(std::move(*adjusterResult));
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // Корректировка дат операций
-    // ═════════════════════════════════════════════════════════════════════════
-
-    std::expected<TimePoint, std::string> adjustDateForBuy(
-        std::string_view instrumentId,
-        const TimePoint& requestedDate)
-    {
-        if (!calendar_) {
-            return requestedDate;
-        }
-
-        auto adjustmentResult = calendar_->adjustDateForOperation(
-            instrumentId, requestedDate, OperationType::Buy);
-
-        if (!adjustmentResult) {
-            return std::unexpected(adjustmentResult.error());
-        }
-
-        return adjustmentResult->adjustedDate;
-    }
-
-    std::expected<TimePoint, std::string> adjustDateForSell(
-        std::string_view instrumentId,
-        const TimePoint& requestedDate)
-    {
-        if (!calendar_) {
-            return requestedDate;
-        }
-
-        auto adjustmentResult = calendar_->adjustDateForOperation(
-            instrumentId, requestedDate, OperationType::Sell);
-
-        if (!adjustmentResult) {
-            return std::unexpected(adjustmentResult.error());
-        }
-
-        return adjustmentResult->adjustedDate;
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // Работа с налоговыми лотами
-    // ═════════════════════════════════════════════════════════════════════════
-
-    void addTaxLot(std::string_view instrumentId,
-                   double quantity,
-                   double price,
-                   const TimePoint& date)
-    {
-        if (!taxCalculator_) {
-            return;
-        }
-
-        TaxLot lot;
-        lot.instrumentId = std::string(instrumentId);
-        lot.quantity = quantity;
-        lot.costBasis = price;
-        lot.purchaseDate = date;
-
-        instrumentLots_[std::string(instrumentId)].push_back(lot);
-    }
-
-    std::expected<double, std::string> processSaleWithTax(
-        std::string_view instrumentId,
-        double quantity,
-        double price,
-        const TimePoint& date,
-        double& cashBalance)
-    {
-        double saleAmount = quantity * price;
-
-        if (!taxCalculator_) {
-            cashBalance += saleAmount;
-            return saleAmount;
-        }
-
-        std::string id(instrumentId);
-        auto& lots = instrumentLots_[id];
-
-        if (lots.empty()) {
-            return std::unexpected("No lots available for sale");
-        }
-
-        auto result = taxCalculator_->recordSale(
-            instrumentId, quantity, price, date, lots);
-
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-
-        double remaining = quantity;
-        for (auto it = lots.begin(); it != lots.end() && remaining > 0.0;) {
-            if (it->quantity <= remaining) {
-                remaining -= it->quantity;
-                it = lots.erase(it);
-            } else {
-                it->quantity -= remaining;
-                remaining = 0.0;
-                ++it;
-            }
-        }
-
-        cashBalance += saleAmount;
-        return saleAmount;
-    }
-
-    double processDividendWithTax(
-        double amount,
-        double& cashBalance)
-    {
-        if (!taxCalculator_) {
-            cashBalance += amount;
-            return amount;
-        }
-
-        taxCalculator_->recordDividend(amount);
-
-        double tax = amount * 0.13;
-        double afterTax = amount - tax;
-        cashBalance += afterTax;
-
-        return afterTax;
-    }
-
-
-
-    void finalizeTaxes(BacktestResult& result, double initialCapital) const
-    {
-        if (!taxCalculator_) {
-            return;
-        }
-
-        auto summary = const_cast<TaxCalculator*>(taxCalculator_.get())->finalize();
-
-        result.taxSummary = summary;
-        result.totalTaxesPaid = summary.totalTax;
-        result.afterTaxFinalValue = result.finalValue - summary.totalTax;
-        result.afterTaxReturn =
-            ((result.afterTaxFinalValue - initialCapital) / initialCapital) * 100.0;
-
-        if (result.totalReturn > 0.0) {
-            result.taxEfficiency = (result.afterTaxReturn / result.totalReturn) * 100.0;
-        }
-
-        if (calendar_) {
-            result.dateAdjustments = calendar_->getAdjustmentLog();
-        }
-    }
-
-    std::expected<RiskFreeRateCalculator, std::string>
-    initializeRiskFreeRate(
+    std::expected<void, std::string> processTradingDay(
+        TradingContext& context,
         const PortfolioParams& params,
-        const std::vector<TimePoint>& tradingDates)  // ✅ Принимаем торговые даты
-    {
-        std::string instrumentId = params.getParameter("risk_free_instrument", "");
+        std::vector<double>& dailyValues,
+        double& totalDividendsReceived,
+        std::size_t& dividendPaymentsCount);
 
-        // Случай 1: Используем инструмент
-        if (!instrumentId.empty()) {
-            std::cout << "\n" << std::string(70, '=') << std::endl;
-            std::cout << "Risk-Free Rate Initialization (from instrument)" << std::endl;
-            std::cout << std::string(70, '=') << std::endl;
-            std::cout << "Instrument: " << instrumentId << std::endl;
+    std::expected<void, std::string> collectCash(
+        TradingContext& context,
+        const PortfolioParams& params,
+        double& totalDividendsReceived,
+        std::size_t& dividendPaymentsCount);
 
-            auto calcResult = RiskFreeRateCalculator::fromInstrument(
-                database_, instrumentId, tradingDates);
+    std::expected<void, std::string> deployCapital(
+        TradingContext& context,
+        const PortfolioParams& params);
 
-            if (!calcResult) {
-                std::cout << "⚠ Failed to load risk-free instrument: "
-                          << calcResult.error() << std::endl;
-                std::cout << "  Falling back to fixed rate" << std::endl;
+    BacktestResult calculateFinalResults(
+        const std::vector<double>& dailyValues,
+        double initialCapital,
+        double totalDividendsReceived,
+        std::size_t dividendPaymentsCount,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        const PortfolioParams& params) const;
 
-                // Fallback на фиксированную ставку
-                double rate = std::stod(params.getParameter("risk_free_rate", "7.0"));
-                std::cout << std::string(70, '=') << std::endl;
-                return RiskFreeRateCalculator::fromRate(
-                    rate / 100.0, tradingDates.size());
-            }
-
-            std::cout << std::string(70, '=') << std::endl;
-            return calcResult;
-        }
-
-        // Случай 2: Используем фиксированную ставку
-        std::cout << "\n" << std::string(70, '=') << std::endl;
-        std::cout << "Risk-Free Rate Initialization (from fixed rate)" << std::endl;
-        std::cout << std::string(70, '=') << std::endl;
-
-        try {
-            double rate = std::stod(params.getParameter("risk_free_rate", "7.0"));
-            auto calc = RiskFreeRateCalculator::fromRate(
-                rate / 100.0, tradingDates.size());
-            std::cout << std::string(70, '=') << std::endl;
-            return calc;
-        } catch (const std::exception& e) {
-            return std::unexpected(
-                std::string("Invalid risk_free_rate parameter: ") + e.what());
-        }
-    }
-
+    void printFinalSummary(const BacktestResult& result) const;
 };
 
 } // namespace portfolio

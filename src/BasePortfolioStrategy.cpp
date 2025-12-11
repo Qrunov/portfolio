@@ -312,7 +312,8 @@ std::expected<void, std::string> BasePortfolioStrategy::loadDividendData(
         for (const auto& [timestamp, value] : history) {
             if (std::holds_alternative<double>(value)) {
                 DividendPayment payment;
-                payment.date = timestamp;
+                // Нормализуем дату дивиденда к началу дня (00:00:00)
+                payment.date = normalizeToDate(timestamp);
                 payment.amount = std::get<double>(value);
                 dividendData[instrumentId].push_back(payment);
             }
@@ -561,7 +562,7 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
 
 IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
     const std::vector<double>& dailyValues,
-    double /* initialCapital */,
+    double initialCapital,
     double totalDividendsReceived,
     std::size_t dividendPaymentsCount,
     const TimePoint& startDate,
@@ -576,19 +577,20 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         endDate - startDate);
     result.tradingDays = totalDuration.count() / 24;
 
-    double initialValue = dailyValues.front();
-    result.totalReturn = ((result.finalValue - initialValue) / initialValue) * 100.0;
+    // Используем initialCapital для расчета возврата, а не dailyValues.front()
+    // так как на первый день portfolioValue может быть 0 (до покупок)
+    result.totalReturn = ((result.finalValue - initialCapital) / initialCapital) * 100.0;
 
     double yearsElapsed = static_cast<double>(result.tradingDays) / 365.25;
     if (yearsElapsed > 0) {
         result.annualizedReturn = (std::pow(
-                                       result.finalValue / initialValue, 1.0 / yearsElapsed) - 1.0) * 100.0;
+                                       result.finalValue / initialCapital, 1.0 / yearsElapsed) - 1.0) * 100.0;
     }
 
     // Дивиденды
     result.totalDividends = totalDividendsReceived;
     if (result.finalValue > 0) {
-        result.dividendYield = (totalDividendsReceived / initialValue) * 100.0;
+        result.dividendYield = (totalDividendsReceived / initialCapital) * 100.0;
     }
     result.dividendPayments = static_cast<std::int64_t>(dividendPaymentsCount);
 

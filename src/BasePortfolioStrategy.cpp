@@ -268,7 +268,22 @@ double BasePortfolioStrategy::calculatePortfolioValue(
         auto priceResult = getPrice(instrumentId, context.currentDate, context);
 
         if (priceResult) {
+            // Цена на текущий день есть
             totalValue += shares * (*priceResult);
+        } else {
+            // Цены на текущий день нет - используем последнюю известную цену
+            // Это важно для корректного расчета portfolioValue в дни без торгов
+            if (context.priceData.count(instrumentId)) {
+                const auto& prices = context.priceData.at(instrumentId);
+
+                // Ищем последнюю цену до текущей даты
+                auto it = prices.upper_bound(context.currentDate);
+                if (it != prices.begin()) {
+                    --it;  // Берем предыдущую (последнюю известную)
+                    totalValue += shares * it->second;
+                }
+                // Если и предыдущей цены нет, акции не учитываются (начало истории)
+            }
         }
     }
 

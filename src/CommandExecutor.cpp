@@ -22,6 +22,7 @@ CommandExecutor::CommandExecutor(std::shared_ptr<IPortfolioDatabase> db)
     // Инициализируем PluginManager
     const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
     std::string searchPath = pluginPath ? pluginPath : "./plugins";
+    //TODO переименовать в databasepluginManager_
     pluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
 
 

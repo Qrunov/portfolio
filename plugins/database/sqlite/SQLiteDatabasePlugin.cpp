@@ -1,5 +1,4 @@
 #include "SQLiteDatabase.hpp"
-#include "../../../include/IPluginFactory.hpp"
 #include <iostream>
 
 #ifdef _WIN32

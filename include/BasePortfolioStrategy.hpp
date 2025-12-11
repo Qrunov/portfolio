@@ -134,15 +134,6 @@ protected:
         const TimePoint& endDate,
         std::map<std::string, std::vector<DividendPayment>>& dividendData);
 
-/*    std::expected<TimePoint, std::string> adjustDateForBuy(
-         const std::string& instrumentId,
-         const TimePoint& date);
-
-    std::expected<TimePoint, std::string> adjustDateForSell(
-        const std::string& instrumentId,
-        const TimePoint& date);
-*/
-
     double calculatePortfolioValue(
         const TradingContext& context) const;
 
@@ -151,6 +142,9 @@ protected:
         const std::string& instrumentId,
         const TimePoint& date,
         const TradingContext& context) const;
+
+    // Нормализация даты к началу дня (убирает время)
+    TimePoint normalizeToDate(const TimePoint& timestamp) const;
 
     // ════════════════════════════════════════════════════════════════════════
     // Параметры по умолчанию

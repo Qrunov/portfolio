@@ -5,6 +5,7 @@
 #include <cmath>
 #include <numeric>
 #include <algorithm>
+#include <ctime>
 
 namespace portfolio {
 
@@ -107,7 +108,8 @@ BasePortfolioStrategy::backtest(
     std::size_t dividendPaymentsCount = 0;
 
     for (std::size_t dayIndex = 0; dayIndex < sortedTradingDays.size(); ++dayIndex) {
-        context.currentDate = sortedTradingDays[dayIndex];
+        // Нормализуем дату к началу дня (убираем время)
+        context.currentDate = normalizeToDate(sortedTradingDays[dayIndex]);
         context.dayIndex = dayIndex;
         context.isRebalanceDay = isRebalanceDay(dayIndex, rebalancePeriod);
         context.isLastDay = (dayIndex == sortedTradingDays.size() - 1);
@@ -202,6 +204,22 @@ bool BasePortfolioStrategy::isRebalanceDay(
 // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Нормализация даты к началу дня (00:00:00)
+// Убирает время, оставляя только дату
+TimePoint BasePortfolioStrategy::normalizeToDate(const TimePoint& timestamp) const
+{
+    auto timeT = std::chrono::system_clock::to_time_t(timestamp);
+    std::tm tm = *std::gmtime(&timeT);
+
+    // Обнуляем время (часы, минуты, секунды)
+    tm.tm_hour = 0;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+
+    auto normalizedTimeT = std::mktime(&tm);
+    return std::chrono::system_clock::from_time_t(normalizedTimeT);
+}
+
 std::expected<double, std::string> BasePortfolioStrategy::getPrice(
     const std::string& instrumentId,
     const TimePoint& date,
@@ -212,7 +230,10 @@ std::expected<double, std::string> BasePortfolioStrategy::getPrice(
     }
 
     const auto& prices = context.priceData.at(instrumentId);
-    auto it = prices.find(date);
+
+    // Нормализуем запрашиваемую дату
+    TimePoint normalizedDate = normalizeToDate(date);
+    auto it = prices.find(normalizedDate);
 
     if (it == prices.end()) {
         return std::unexpected(
@@ -262,7 +283,9 @@ std::expected<void, std::string> BasePortfolioStrategy::loadPriceData(
 
         for (const auto& [timestamp, value] : history) {
             if (std::holds_alternative<double>(value)) {
-                priceData[instrumentId][timestamp] = std::get<double>(value);
+                // Нормализуем дату к началу дня (убираем время)
+                TimePoint normalizedDate = normalizeToDate(timestamp);
+                priceData[instrumentId][normalizedDate] = std::get<double>(value);
             }
         }
     }
@@ -303,42 +326,6 @@ std::expected<void, std::string> BasePortfolioStrategy::loadDividendData(
 
     return {};
 }
-
-/*
-std::expected<TimePoint, std::string> BasePortfolioStrategy::adjustDateForBuy(
-    const std::string& instrumentId,
-    const TimePoint& date)
-{
-    if (!calendar_) {
-        return date;
-    }
-
-    auto adjustResult = calendar_->adjustDateForBuy(instrumentId, date);
-
-    if (!adjustResult) {
-        return std::unexpected(adjustResult.error());
-    }
-
-    return adjustResult->adjustedDate;
-}
-
-std::expected<TimePoint, std::string> BasePortfolioStrategy::adjustDateForSell(
-    const std::string& instrumentId,
-    const TimePoint& date)
-{
-    if (!calendar_) {
-        return date;
-    }
-
-    auto adjustResult = calendar_->adjustDateForSell(instrumentId, date);
-
-    if (!adjustResult) {
-        return std::unexpected(adjustResult.error());
-    }
-
-    return adjustResult->adjustedDate;
-}
-*/
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ПРИВАТНЫЕ МЕТОДЫ ШАБЛОННОГО МЕТОДА
@@ -382,10 +369,9 @@ std::expected<void, std::string> BasePortfolioStrategy::initializeTradingCalenda
     auto calendarResult = TradingCalendar::create(
         database_,
         params.instrumentIds,
-        startDate,              //
-        endDate,                //
-        referenceInstrument     //
-        );
+        startDate,
+        endDate,
+        referenceInstrument);
 
     if (!calendarResult) {
         return std::unexpected("Failed to create trading calendar: " +
@@ -575,7 +561,7 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
 
 IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
     const std::vector<double>& dailyValues,
-    double initialCapital,
+    double /* initialCapital */,
     double totalDividendsReceived,
     std::size_t dividendPaymentsCount,
     const TimePoint& startDate,
@@ -593,10 +579,10 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
     double initialValue = dailyValues.front();
     result.totalReturn = ((result.finalValue - initialValue) / initialValue) * 100.0;
 
-    double yearsElapsed = result.tradingDays / 365.25;
+    double yearsElapsed = static_cast<double>(result.tradingDays) / 365.25;
     if (yearsElapsed > 0) {
         result.annualizedReturn = (std::pow(
-            result.finalValue / initialValue, 1.0 / yearsElapsed) - 1.0) * 100.0;
+                                       result.finalValue / initialValue, 1.0 / yearsElapsed) - 1.0) * 100.0;
     }
 
     // Дивиденды
@@ -604,7 +590,7 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
     if (result.finalValue > 0) {
         result.dividendYield = (totalDividendsReceived / initialValue) * 100.0;
     }
-    result.dividendPayments = dividendPaymentsCount;
+    result.dividendPayments = static_cast<std::int64_t>(dividendPaymentsCount);
 
     // Волатильность
     if (dailyValues.size() > 1) {
@@ -617,13 +603,13 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         }
 
         double meanReturn = std::accumulate(
-            dailyReturns.begin(), dailyReturns.end(), 0.0) / dailyReturns.size();
+                                dailyReturns.begin(), dailyReturns.end(), 0.0) / static_cast<double>(dailyReturns.size());
 
         double variance = 0.0;
         for (double r : dailyReturns) {
             variance += std::pow(r - meanReturn, 2);
         }
-        variance /= dailyReturns.size();
+        variance /= static_cast<double>(dailyReturns.size());
 
         double dailyVolatility = std::sqrt(variance);
         result.volatility = dailyVolatility * std::sqrt(252.0) * 100.0;
@@ -660,13 +646,13 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
             }
 
             double meanExcess = std::accumulate(
-                excessReturns.begin(), excessReturns.end(), 0.0) / excessReturns.size();
+                                    excessReturns.begin(), excessReturns.end(), 0.0) / static_cast<double>(excessReturns.size());
 
             double varianceExcess = 0.0;
             for (double r : excessReturns) {
                 varianceExcess += std::pow(r - meanExcess, 2);
             }
-            varianceExcess /= excessReturns.size();
+            varianceExcess /= static_cast<double>(excessReturns.size());
 
             double stdExcess = std::sqrt(varianceExcess);
 

@@ -139,6 +139,11 @@ public:
     }
 
     // Load plugin and create database instance
+    //TODO здесь двойственный подход к упралению плагинами разных типов
+    //С одной стороны для типизации используется шаблонный параметр
+    //с другой есть явные отдельные для каждого типа функции, создающие объект плагина
+    //надо оставить одну функцию load(...), которая будет возвращать std::shared_ptr<PluginInterface>>
+    //а deleter там стандартный, должен быть
     std::expected<std::shared_ptr<PluginInterface>, std::string>
     loadDatabasePlugin(std::string_view pluginName, std::string_view config) {
         auto pluginResult = loadPlugin(pluginName);
@@ -306,6 +311,10 @@ private:
         // Пробуем разные варианты путей и расширений
         std::vector<std::string> searchPaths = {
             pluginPath_ + "/" + name,              // Прямо в pluginPath
+
+
+            //TODO сделать имя каталога через тип PluginInterfасe, сканировать только в плодкаталоге типа
+            //можно даже подкаталоги так называть как базовый интерфейс
             pluginPath_ + "/database/" + name,     // В подпапке database
             pluginPath_ + "/strategy/" + name,     // В подпапке strategy
         };
@@ -365,6 +374,7 @@ private:
                 dlsym(handle, "createStrategy"));
         }
 
+        //TODO destroyFunc надо исключить, вся работа выполняется диструктором соответсвующего класса
         auto destroyFunc = reinterpret_cast<DestroyFunc>(
             dlsym(handle, "destroyDatabase"));
         if (!destroyFunc) {

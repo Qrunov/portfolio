@@ -168,20 +168,43 @@ void CSVDataSource::clearRequests() {
     attributeRequests_.clear();
 }
 
+
 std::expected<TimePoint, std::string> CSVDataSource::parseDateString(
     std::string_view dateStr) const {
-    
+
     std::tm tm = {};
     std::istringstream iss(dateStr.data());
     iss >> std::get_time(&tm, dateFormat_.c_str());
 
     if (iss.fail()) {
-        return std::unexpected(std::string("Failed to parse date: ") + 
-                             std::string(dateStr) +
-                             " with format: " + dateFormat_);
+        return std::unexpected(std::string("Failed to parse date: ") +
+                               std::string(dateStr) +
+                               " with format: " + dateFormat_);
     }
 
-    auto timeT = std::mktime(&tm);
+    // CRITICAL FIX: Если день не был установлен парсером (tm_mday == 0),
+    // устанавливаем первый день месяца
+    // В struct tm дни нумеруются с 1, а 0 означает "последний день предыдущего месяца"
+    if (tm.tm_mday == 0) {
+        tm.tm_mday = 1;
+    }
+
+// CRITICAL FIX: Используем timegm вместо mktime!
+// mktime интерпретирует tm как localtime
+// timegm интерпретирует tm как UTC
+#ifdef _WIN32
+    // Windows: используем _mkgmtime
+    auto timeT = _mkgmtime(&tm);
+#else
+    // POSIX/Linux: используем timegm
+    auto timeT = timegm(&tm);
+#endif
+
+    if (timeT == -1) {
+        return std::unexpected("Failed to convert date to time_t: " +
+                               std::string(dateStr));
+    }
+
     return std::chrono::system_clock::from_time_t(timeT);
 }
 

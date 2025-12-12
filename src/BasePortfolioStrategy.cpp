@@ -221,19 +221,20 @@ bool BasePortfolioStrategy::isRebalanceDay(
 // Убирает время, оставляя только дату
 TimePoint BasePortfolioStrategy::normalizeToDate(const TimePoint& timestamp) const
 {
-    using namespace std::chrono;
-
-    // Получаем количество секунд с эпохи Unix
-    auto timeT = system_clock::to_time_t(timestamp);
+    // Получаем количество секунд с epoch
+    auto duration = timestamp.time_since_epoch();
+    auto seconds = duration_cast<std::chrono::seconds>(duration).count();
 
     // Вычисляем количество полных дней (целочисленное деление)
     // Это безопасно и не требует gmtime/localtime
-    auto days = timeT / (24 * 3600);
+    constexpr int64_t secondsPerDay = 24 * 60 * 60;
+    auto days = seconds / secondsPerDay;
 
-    // Возвращаем начало дня (полночь)
-    auto normalizedTimeT = days * (24 * 3600);
+    // Возвращаем начало дня (полночь UTC)
+    auto normalizedSeconds = days * secondsPerDay;
 
-    return system_clock::from_time_t(normalizedTimeT);
+    return TimePoint{std::chrono::seconds{normalizedSeconds}};
+
 }
 
 std::expected<double, std::string> BasePortfolioStrategy::getPrice(

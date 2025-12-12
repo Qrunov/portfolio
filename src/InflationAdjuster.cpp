@@ -156,7 +156,9 @@ double InflationAdjuster::getCumulativeInflation(
     auto current = startDate;
     double cumulativeInflation = 1.0;  // Начинаем с 1.0 (100%)
 
-    while (current < endDate) {
+    // CRITICAL FIX #1: Изменено с < на <=
+    // Без этого последний месяц не учитывается!
+    while (current <= endDate) {
         std::string monthKey = getMonthKey(current);
         double monthlyRate = getMonthlyInflation(monthKey);
 
@@ -166,7 +168,16 @@ double InflationAdjuster::getCumulativeInflation(
 
         // Переходим к следующему месяцу
         auto timeT = std::chrono::system_clock::to_time_t(current);
-        std::tm tm = *std::localtime(&timeT);
+
+        // CRITICAL FIX #2: Используем gmtime_r вместо localtime!
+        // localtime конвертирует в локальное время
+        // gmtime_r конвертирует в UTC
+        std::tm tm;
+#ifdef _WIN32
+        gmtime_s(&tm, &timeT);
+#else
+        gmtime_r(&timeT, &tm);
+#endif
 
         tm.tm_mon += 1;
         if (tm.tm_mon > 11) {
@@ -174,12 +185,29 @@ double InflationAdjuster::getCumulativeInflation(
             tm.tm_year += 1;
         }
 
-        current = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+// CRITICAL FIX #3: Используем timegm вместо mktime!
+// mktime интерпретирует tm как localtime
+// timegm интерпретирует tm как UTC
+#ifdef _WIN32
+        auto newTimeT = _mkgmtime(&tm);
+#else
+        auto newTimeT = timegm(&tm);
+#endif
+
+        if (newTimeT == -1) {
+            // Если конвертация не удалась, прерываем цикл
+            break;
+        }
+
+        current = std::chrono::system_clock::from_time_t(newTimeT);
     }
 
     // Возвращаем процентное изменение
     return (cumulativeInflation - 1.0) * 100.0;
 }
+
+
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Корректировка номинальной доходности
@@ -219,7 +247,16 @@ double InflationAdjuster::adjustReturn(
 std::string InflationAdjuster::getMonthKey(const TimePoint& date) noexcept
 {
     auto timeT = std::chrono::system_clock::to_time_t(date);
-    std::tm tm = *std::localtime(&timeT);
+
+    // CRITICAL FIX: Используем gmtime_r вместо localtime!
+    // localtime конвертирует в локальное время
+    // gmtime_r конвертирует в UTC
+    std::tm tm;
+#ifdef _WIN32
+    gmtime_s(&tm, &timeT);  // Windows: gmtime_s
+#else
+    gmtime_r(&timeT, &tm);  // POSIX: gmtime_r
+#endif
 
     std::ostringstream oss;
     oss << std::put_time(&tm, "%Y-%m");

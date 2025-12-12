@@ -1,4 +1,3 @@
-// src/TradingCalendar.cpp
 #include "TradingCalendar.hpp"
 #include <algorithm>
 #include <iostream>
@@ -18,18 +17,19 @@ TradingCalendar::TradingCalendar(
     bool usedAlternative,
     TimePoint startDate,
     TimePoint endDate)
-    : database_(std::move(database)),
-    tradingDays_(std::move(tradingDays)),
-    referenceInstrument_(std::move(referenceInstrument)),
-    usedAlternative_(usedAlternative),
-    startDate_(startDate),
-    endDate_(endDate)
+    : database_(std::move(database))
+    , tradingDays_(std::move(tradingDays))
+    , referenceInstrument_(std::move(referenceInstrument))
+    , usedAlternative_(usedAlternative)
+    , startDate_(startDate)
+    , endDate_(endDate)
 {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Создание календаря
 // ═══════════════════════════════════════════════════════════════════════════════
+
 std::expected<std::unique_ptr<TradingCalendar>, std::string>
 TradingCalendar::create(
     std::shared_ptr<IPortfolioDatabase> database,
@@ -59,63 +59,52 @@ TradingCalendar::create(
     // ════════════════════════════════════════════════════════════════════════
 
     if (!referenceInstrument.empty()) {
-        std::cout << "Reference instrument: " << referenceInstrument << std::endl;
+        std::cout << "Reference Instrument: " << referenceInstrument << std::endl;
 
-        // ✅ Получаем все даты для референсного инструмента
-        std::vector<TimePoint> refDates;
-        auto current = startDate;
-
-        while (current <= endDate) {
-            auto valueResult = database->getAttributeHistory(
-                referenceInstrument, "close", startDate, endDate);
-
-            if (valueResult) {
-                refDates.push_back(current);
-            }
-
-            // Переходим к следующему дню
-            current += std::chrono::hours(24);
+        auto instExists = database->instrumentExists(referenceInstrument);
+        if (!instExists) {
+            return std::unexpected(
+                "Failed to check reference instrument: " + instExists.error());
         }
 
-        if (!refDates.empty()) {
-            selectedInstrument = referenceInstrument;
-            selectedDays = refDates.size();
-            usedAlternative = false;
-
-            std::cout << "✓ Reference available: " << selectedDays << " days" << std::endl;
+        if (!instExists.value()) {
+            std::cout << "⚠ Warning: Reference instrument not found in database"
+                      << std::endl;
         } else {
-            std::cout << "⚠ Reference instrument not available" << std::endl;
+            // Проверяем наличие данных
+            auto priceHistory = database->getAttributeHistory(
+                referenceInstrument, "close", startDate, endDate);
+
+            if (priceHistory && !priceHistory->empty()) {
+                selectedInstrument = referenceInstrument;
+                selectedDays = priceHistory->size();
+                std::cout << "✓ Using reference: " << referenceInstrument
+                          << " (" << selectedDays << " days)" << std::endl;
+            } else {
+                std::cout << "⚠ Warning: Reference instrument has no price data"
+                          << std::endl;
+            }
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Шаг 2: Если референс недоступен - ищем альтернативу среди портфеля
+    // Шаг 2: Если референс не подошёл - выбираем из портфеля
     // ════════════════════════════════════════════════════════════════════════
 
     if (selectedInstrument.empty()) {
-        std::cout << "Searching for alternative with most trading days..." << std::endl;
+        std::cout << "Selecting alternative from portfolio instruments..."
+                  << std::endl;
 
         std::map<std::string, std::size_t> portfolioDays;
 
         for (const auto& instrumentId : instrumentIds) {
-            std::vector<TimePoint> dates;
-            auto current = startDate;
+            auto priceHistory = database->getAttributeHistory(
+                instrumentId, "close", startDate, endDate);
 
-            while (current <= endDate) {
-                auto valueResult = database->getAttributeHistory(
-                    instrumentId, "close", startDate, endDate);
-
-                if (valueResult) {
-                    dates.push_back(current);
-                }
-
-                current += std::chrono::hours(24);
-            }
-
-            if (!dates.empty()) {
-                portfolioDays[instrumentId] = dates.size();
-                std::cout << "  " << instrumentId << ": "
-                          << dates.size() << " days" << std::endl;
+            if (priceHistory && !priceHistory->empty()) {
+                portfolioDays[instrumentId] = priceHistory->size();
+                std::cout << "  • " << instrumentId << ": "
+                          << priceHistory->size() << " days" << std::endl;
             }
         }
 
@@ -141,23 +130,22 @@ TradingCalendar::create(
     // Шаг 3: Загружаем торговые дни выбранного инструмента
     // ════════════════════════════════════════════════════════════════════════
 
-    std::set<TimePoint> tradingDays;
-    auto current = startDate;
+    auto priceHistory = database->getAttributeHistory(
+        selectedInstrument, "close", startDate, endDate);
 
-    while (current <= endDate) {
-        auto valueResult = database->getAttributeHistory(
-            selectedInstrument, "close", startDate, endDate);
-
-        if (valueResult) {
-            tradingDays.insert(current);
-        }
-
-        current += std::chrono::hours(24);
+    if (!priceHistory) {
+        return std::unexpected(
+            "Failed to get price history: " + priceHistory.error());
     }
 
-    if (tradingDays.empty()) {
+    if (priceHistory->empty()) {
         return std::unexpected(
             "No trading days found for " + selectedInstrument);
+    }
+
+    std::set<TimePoint> tradingDays;
+    for (const auto& [timestamp, value] : *priceHistory) {
+        tradingDays.insert(normalizeDate(timestamp));
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -170,25 +158,31 @@ TradingCalendar::create(
         selectedInstrument,
         usedAlternative,
         startDate,
-        endDate
-        );
+        endDate);
 
     calendar->sortedTradingDays_.assign(
         calendar->tradingDays_.begin(),
-        calendar->tradingDays_.end()
-        );
+        calendar->tradingDays_.end());
+
     std::cout << "Calendar created successfully:" << std::endl;
     std::cout << "  Trading days: " << calendar->getTradingDaysCount() << std::endl;
 
-    // ✅ Получаем первый и последний день из set
+    // Получаем первый и последний день из set
     if (!tradingDays.empty()) {
         auto firstTime = std::chrono::system_clock::to_time_t(*tradingDays.begin());
         auto lastTime = std::chrono::system_clock::to_time_t(*tradingDays.rbegin());
 
+        std::tm firstTm;
+        std::tm lastTm;
+
+        // CRITICAL FIX: Используем gmtime_r для UTC вместо localtime
+        gmtime_r(&firstTime, &firstTm);
+        gmtime_r(&lastTime, &lastTm);
+
         std::cout << "  First day: "
-                  << std::put_time(std::localtime(&firstTime), "%Y-%m-%d") << std::endl;
+                  << std::put_time(&firstTm, "%Y-%m-%d") << std::endl;
         std::cout << "  Last day:  "
-                  << std::put_time(std::localtime(&lastTime), "%Y-%m-%d") << std::endl;
+                  << std::put_time(&lastTm, "%Y-%m-%d") << std::endl;
     }
 
     std::cout << std::string(70, '=') << std::endl;
@@ -232,66 +226,64 @@ std::expected<DateAdjustment, std::string> TradingCalendar::adjustDateForOperati
             adjustment.adjustedDate = *nextTrading;
         } else {
             return std::unexpected(
-                "No trading days after requested date (period ended)");  // ← Улучшено
+                "No trading days after requested date (period ended)");
         }
     }
 
-    // Проверяем наличие данных для инструмента
+    // Проверяем наличие данных на скорректированную дату
     if (!hasDataForDate(instrumentId, adjustment.adjustedDate)) {
-
+        // Данных нет на этот торговый день для данного инструмента
         if (operation == OperationType::Buy) {
-            // Покупка: только forward
-            auto nextResult = findNextAvailableDate(
-                instrumentId, adjustment.adjustedDate);
-
-            if (!nextResult) {
+            // Для покупки: только вперёд
+            auto nextAvailable = findNextAvailableDate(instrumentId, adjustment.adjustedDate);
+            if (!nextAvailable) {
                 return std::unexpected(
-                    "No future data available for " +
-                    std::string(instrumentId) + ": " + nextResult.error());
+                    "No future data for " + std::string(instrumentId) + ": " +
+                    nextAvailable.error());
             }
-
-            adjustment.adjustedDate = *nextResult;
-            adjustment.reason = "Forward transfer: no data on requested date";
-
+            adjustment.adjustedDate = *nextAvailable;
+            adjustment.reason = "No data on trading day, moved forward";
         } else {
-            // Продажа: сначала пробуем forward
-            auto nextResult = findNextAvailableDate(
-                instrumentId, adjustment.adjustedDate);
-
-            if (nextResult) {
-                adjustment.adjustedDate = *nextResult;
-                adjustment.reason = "Forward transfer: no data on requested date";
+            // Для продажи: сначала пробуем назад, если не получится — вперёд
+            auto prevAvailable = findPreviousAvailableDate(instrumentId, adjustment.adjustedDate);
+            if (prevAvailable) {
+                adjustment.adjustedDate = *prevAvailable;
+                adjustment.reason = "No data on trading day, moved backward";
             } else {
-                // Нет данных вперёд - используем последний доступный
-                auto prevResult = findPreviousAvailableDate(
-                    instrumentId, adjustment.adjustedDate);
-
-                if (!prevResult) {
+                // Назад не получилось, пробуем вперёд
+                auto nextAvailable = findNextAvailableDate(instrumentId, adjustment.adjustedDate);
+                if (!nextAvailable) {
                     return std::unexpected(
-                        "No data available for " + std::string(instrumentId));
+                        "No data for " + std::string(instrumentId) + " (forward/backward)");
                 }
-
-                adjustment.adjustedDate = *prevResult;
-                adjustment.reason = "Backward transfer: no future data (possible delisting)";
+                adjustment.adjustedDate = *nextAvailable;
+                adjustment.reason = "No data on trading day, moved forward (backward unavailable)";
             }
         }
     }
 
-    // Логируем если была корректировка
+    // Логируем корректировку
     if (adjustment.wasAdjusted()) {
         adjustmentLog_.push_back(adjustment);
 
-        // Выводим информацию о корректировке
         auto reqTime = std::chrono::system_clock::to_time_t(adjustment.requestedDate);
         auto adjTime = std::chrono::system_clock::to_time_t(adjustment.adjustedDate);
 
-        std::cout << "⚠ Date adjustment for " << instrumentId << ":" << std::endl;
-        std::cout << "  Operation: "
-                  << (operation == OperationType::Buy ? "BUY" : "SELL") << std::endl;
+        std::tm reqTm;
+        std::tm adjTm;
+
+        // CRITICAL FIX: Используем gmtime_r для UTC вместо localtime
+        gmtime_r(&reqTime, &reqTm);
+        gmtime_r(&adjTime, &adjTm);
+
+        std::cout << "Date Adjustment:" << std::endl;
+        std::cout << "  Instrument: " << instrumentId << std::endl;
+        std::cout << "  Operation:  " << (operation == OperationType::Buy ?
+                                              "BUY" : "SELL") << std::endl;
         std::cout << "  Requested: "
-                  << std::put_time(std::localtime(&reqTime), "%Y-%m-%d") << std::endl;
+                  << std::put_time(&reqTm, "%Y-%m-%d") << std::endl;
         std::cout << "  Adjusted:  "
-                  << std::put_time(std::localtime(&adjTime), "%Y-%m-%d") << std::endl;
+                  << std::put_time(&adjTm, "%Y-%m-%d") << std::endl;
         std::cout << "  Reason: " << adjustment.reason << std::endl;
         std::cout << "  Days diff: " << adjustment.daysDifference() << std::endl;
     }
@@ -373,15 +365,21 @@ bool TradingCalendar::hasDataForDate(
 
 TimePoint TradingCalendar::normalizeDate(const TimePoint& date) noexcept
 {
-    auto timeT = std::chrono::system_clock::to_time_t(date);
-    std::tm tm = *std::localtime(&timeT);
+    // CRITICAL FIX: Используем арифметику без time_t для избежания проблем с timezone
 
-    // Обнуляем время
-    tm.tm_hour = 0;
-    tm.tm_min = 0;
-    tm.tm_sec = 0;
+    // Получаем количество секунд с epoch
+    auto duration = date.time_since_epoch();
+    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
 
-    return std::chrono::system_clock::from_time_t(std::mktime(&tm));
+    // Вычисляем количество полных дней (целочисленное деление)
+    // Это работает корректно в UTC без зависимости от локальной временной зоны
+    constexpr int64_t secondsPerDay = 24 * 60 * 60;
+    auto days = seconds / secondsPerDay;
+
+    // Возвращаем начало дня (полночь UTC)
+    auto normalizedSeconds = days * secondsPerDay;
+
+    return TimePoint{std::chrono::seconds{normalizedSeconds}};
 }
 
 } // namespace portfolio

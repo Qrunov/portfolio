@@ -565,22 +565,61 @@ Result SQLiteDatabase::deleteSource(std::string_view source) {
 // ============================================================================
 
 std::string SQLiteDatabase::timePointToString(const TimePoint& tp) {
+    // Конвертируем в time_t
     std::time_t t = std::chrono::system_clock::to_time_t(tp);
+
+    // CRITICAL: Используем gmtime_r для UTC (НЕ localtime!)
     std::tm tm;
-    gmtime_r(&t, &tm);  // Явно UTC (thread-safe)
-    std::string dateStr = std::format("{:04d}-{:02d}-{:02d}",
-                                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
-    return dateStr;
+#ifdef _WIN32
+    gmtime_s(&tm, &t);  // Windows: gmtime_s
+#else
+    gmtime_r(&t, &tm);  // POSIX: gmtime_r
+#endif
+
+    // Форматируем как "YYYY-MM-DD 00:00:00" (с временем!)
+    std::ostringstream oss;
+    oss << std::setfill('0')
+        << std::setw(4) << (tm.tm_year + 1900) << '-'
+        << std::setw(2) << (tm.tm_mon + 1) << '-'
+        << std::setw(2) << tm.tm_mday
+        << " 00:00:00";  // ВАЖНО: добавляем время!
+
+    return oss.str();
 }
+
 
 TimePoint SQLiteDatabase::stringToTimePoint(const std::string& str) {
     std::tm tm = {};
     std::istringstream ss(str);
+
+    // Парсим строку формата "YYYY-MM-DD HH:MM:SS"
     ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
 
-    auto time = std::mktime(&tm);
+    if (ss.fail()) {
+        // Если парсинг не удался, возвращаем epoch
+        return TimePoint{};
+    }
+
+// CRITICAL FIX: Используем timegm/gmtime_r для UTC (НЕ mktime!)
+// mktime интерпретирует tm как LOCAL time
+// timegm интерпретирует tm как UTC
+
+#ifdef _WIN32
+    // Windows: используем _mkgmtime
+    auto time = _mkgmtime(&tm);
+#else
+    // POSIX/Linux: используем timegm
+    auto time = timegm(&tm);
+#endif
+
+    if (time == -1) {
+        // Если конвертация не удалась, возвращаем epoch
+        return TimePoint{};
+    }
+
     return std::chrono::system_clock::from_time_t(time);
 }
+
 
 std::string SQLiteDatabase::attributeValueToString(const AttributeValue& value) {
     if (std::holds_alternative<double>(value)) {

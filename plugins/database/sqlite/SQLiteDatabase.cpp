@@ -565,13 +565,12 @@ Result SQLiteDatabase::deleteSource(std::string_view source) {
 // ============================================================================
 
 std::string SQLiteDatabase::timePointToString(const TimePoint& tp) {
-    auto time = std::chrono::system_clock::to_time_t(tp);
-    std::tm tm = *std::gmtime(&time);
-
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
-
-    return oss.str();
+    std::time_t t = std::chrono::system_clock::to_time_t(tp);
+    std::tm tm;
+    gmtime_r(&t, &tm);  // Явно UTC (thread-safe)
+    std::string dateStr = std::format("{:04d}-{:02d}-{:02d}",
+                                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    return dateStr;
 }
 
 TimePoint SQLiteDatabase::stringToTimePoint(const std::string& str) {

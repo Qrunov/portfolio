@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(PortfolioManagement VERSION 1.0.0 LANGUAGES CXX)
+set(PATCH_VERSION "1" CACHE INTERNAL "Patch version")
+project(PortfolioManagement VERSION 1.0.${PATCH_VERSION} LANGUAGES CXX)
 
 # ============================================================================
 # Project Settings
@@ -76,14 +77,14 @@ endif()
 # Installation
 # ============================================================================
 
-install(TARGETS portfolio_app
+install(TARGETS portfolio
     RUNTIME DESTINATION bin
 )
 
-install(DIRECTORY include/
-    DESTINATION include/portfolio
-    FILES_MATCHING PATTERN "*.hpp"
-)
+#install(DIRECTORY include/
+#    DESTINATION include/portfolio
+#    FILES_MATCHING PATTERN "*.hpp"
+#)
 
 # Install plugin directories structure
 install(DIRECTORY "${PORTFOLIO_PLUGIN_OUTPUT_DIR}/"
@@ -94,7 +95,7 @@ install(DIRECTORY "${PORTFOLIO_PLUGIN_OUTPUT_DIR}/"
 # ============================================================================
 # Package Configuration
 # ============================================================================
-
+include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
@@ -114,6 +115,16 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PortfolioManagementConfigVersion.cmake"
     DESTINATION lib/cmake/PortfolioManagement
 )
+
+install(FILES ${CMAKE_SOURCE_DIR}/database/portfolio_sample.db  DESTINATION ${CMAKE_INSTALL_DATADIR})
+
+set(CPACK_GENERATOR DEB)
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
+set(CPACK_PACKAGE_CONTACT example@example.com)
+include(CPack)
 
 # ============================================================================
 # Print Configuration Summary

@@ -75,4 +75,7 @@ portfolio_add_test(
     LIBRARIES inmemory_db_impl
 )
 
+
+#TODO: добавить тест для проверки RiskFreeRateCalculator
+
 message(STATUS "  ✓ Added test: inflation_adjuster")

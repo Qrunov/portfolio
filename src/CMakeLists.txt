@@ -62,15 +62,15 @@ portfolio_enable_warnings(portfolio_cli)
 # Main Application
 # ============================================================================
 
-add_executable(portfolio_app main.cpp)
+add_executable(portfolio main.cpp)
 
-target_include_directories(portfolio_app PRIVATE
+target_include_directories(portfolio PRIVATE
     ${PORTFOLIO_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${Boost_INCLUDE_DIRS}
 )
 
-target_link_libraries(portfolio_app PRIVATE
+target_link_libraries(portfolio PRIVATE
     portfolio_core
     portfolio_cli
     ${Boost_LIBRARIES}
@@ -78,18 +78,18 @@ target_link_libraries(portfolio_app PRIVATE
 )
 
 # Enable warnings
-portfolio_enable_warnings(portfolio_app)
+portfolio_enable_warnings(portfolio)
 
 # Optional sanitizers
 if(PORTFOLIO_ENABLE_SANITIZERS)
-    portfolio_enable_sanitizers(portfolio_app)
+    portfolio_enable_sanitizers(portfolio)
 endif()
 
 # ============================================================================
 # Installation
 # ============================================================================
 
-install(TARGETS portfolio_core portfolio_cli
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-)
+#install(TARGETS portfolio_core portfolio_cli
+#    ARCHIVE DESTINATION lib
+#    LIBRARY DESTINATION lib
+#)

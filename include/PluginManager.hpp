@@ -418,14 +418,14 @@ private:
 
         loadedPlugins_[name] = info;
 
-        std::cout << "Successfully loaded plugin: " << info.displayName
-                  << " from " << fullPath;
+//        std::cout << "Successfully loaded plugin: " << info.displayName
+//                  << " from " << fullPath;
 
-        if (getVersionFunc) {
-            std::cout << " (version: " << getVersionFunc() << ")";
-        }
+//        if (getVersionFunc) {
+//            std::cout << " (version: " << getVersionFunc() << ")";
+//        }
 
-        std::cout << std::endl;
+//        std::cout << std::endl;
 
         return std::cref(loadedPlugins_[name]);
     }

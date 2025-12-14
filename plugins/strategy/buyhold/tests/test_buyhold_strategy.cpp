@@ -168,18 +168,18 @@ TEST_F(RefactoredBuyHoldTest, BacktestWithMultipleDividendPayments) {
     auto metrics = *result;
 
     // Дивиденды реинвестируются автоматически (Buy&Hold поведение)
-    // День 2: $10 × 1000 = $10,000 → покупка 100 → всего 1100
-    // День 4: $10 × 1100 = $11,000 → покупка 110 → всего 1210
-    // День 6: $10 × 1210 = $12,100 → покупка 121 → всего 1331
-    // День 8: $10 × 1331 = $13,310 → покупка 133 → всего 1464
-    // Итого дивидендов: $46,410 (с учетом реинвестирования)
+    // День 2: 10 × 1000 = 10,000 → покупка 100 → всего 1100
+    // День 4: 10 × 1100 = 11,000 → покупка 110 → всего 1210
+    // День 6: 10 × 1210 = 12,100 → покупка 121 → всего 1331
+    // День 8: 10 × 1331 = 13,310 → покупка 133 → всего 1464
+    // Итого дивидендов: 40,410 (с учетом реинвестирования)
 
     EXPECT_EQ(metrics.dividendPayments, 4) << "Should have 4 dividend payments";
     EXPECT_NEAR(metrics.totalDividends, 46410.0, 50.0)
         << "Total dividends with reinvestment";
 
     // Проверяем финальную стоимость
-    // $100,000 + $46,410 (дивиденды) = $146,410
+    // 100,000 + 46,410 (дивиденды) = 146,410
     EXPECT_NEAR(metrics.finalValue, 146410.0, 50.0);
 }
 
@@ -226,7 +226,7 @@ TEST_F(RefactoredBuyHoldTest, RebalancingSellsExcess) {
 TEST_F(RefactoredBuyHoldTest, IntegerSharesOnly) {
     auto params = createParams({"GAZP"});
 
-    // Цена $101 - чтобы получить дробное количество акций
+    // Цена 101 - чтобы получить дробное количество акций
     std::vector<double> prices(10, 101.0);
     addInstrumentData("GAZP", "Gazprom", prices);
 
@@ -235,7 +235,7 @@ TEST_F(RefactoredBuyHoldTest, IntegerSharesOnly) {
     ASSERT_TRUE(result.has_value());
 
     // Должно купить floor(100000 / 101) = 990 акций
-    // Остаток ~$10 должен остаться в кэше
+    // Остаток ~10 должен остаться в кэше
 }
 
 TEST_F(RefactoredBuyHoldTest, FreeCashRedistribution) {
@@ -276,9 +276,9 @@ TEST_F(RefactoredBuyHoldTest, WeightRebalancingWithUnequalWeights) {
     ASSERT_TRUE(result.has_value());
 
     // Должны быть куплены акции пропорционально весам:
-    // GAZP: ~500 акций ($50000)
-    // SBER: ~300 акций ($30000)
-    // LKOH: ~200 акций ($20000)
+    // GAZP: ~500 акций (50000)
+    // SBER: ~300 акций (30000)
+    // LKOH: ~200 акций (20000)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

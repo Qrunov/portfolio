@@ -116,7 +116,7 @@ void CommandExecutor::printBacktestResult(
     // Основные метрики
     std::cout << "Performance Metrics:" << std::endl;
     std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
-    std::cout << "  Final Value:         $" << std::fixed << std::setprecision(2)
+    std::cout << "  Final Value:         " << std::fixed << std::setprecision(2)
               << result.finalValue << std::endl;
     std::cout << "  Total Return:        " << std::setprecision(2)
               << result.totalReturn << "%" << std::endl;
@@ -137,7 +137,7 @@ void CommandExecutor::printBacktestResult(
     // ✅ ИСПРАВЛЕНО: totalDividends вместо totalDividendsReceived
     if (result.totalDividends > 0) {
         std::cout << "Dividend Income:" << std::endl;
-        std::cout << "  Total Dividends:     $" << std::setprecision(2)
+        std::cout << "  Total Dividends:     " << std::setprecision(2)
                   << result.totalDividends << std::endl;
         std::cout << "  Dividend Yield:      " << std::setprecision(2)
                   << result.dividendYield << "%" << std::endl;
@@ -149,7 +149,7 @@ void CommandExecutor::printBacktestResult(
         std::cout << "Tax Information:" << std::endl;
         std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
                   << result.totalTaxesPaid << std::endl;
-        std::cout << "  After-Tax Value:     $" << std::setprecision(2)
+        std::cout << "  After-Tax Value:     " << std::setprecision(2)
                   << result.afterTaxFinalValue << std::endl;
         std::cout << "  After-Tax Return:    " << std::setprecision(2)
                   << result.afterTaxReturn << "%" << std::endl;
@@ -1117,7 +1117,7 @@ std::expected<void, std::string> CommandExecutor::executePortfolioShow(
         std::cout << "Description: " << info.description << std::endl;
     }
 
-    std::cout << "Initial Capital: $" << std::fixed << std::setprecision(2)
+    std::cout << "Initial Capital: " << std::fixed << std::setprecision(2)
               << info.initialCapital << std::endl;
     std::cout << "Created: " << info.createdDate << std::endl;
     std::cout << "Modified: " << info.modifiedDate << std::endl;
@@ -1503,7 +1503,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     if (params.hasParameter("initial_capital")) {
         try {
             initialCapital = std::stod(params.getParameter("initial_capital"));
-            std::cout << "Using custom initial capital: $" << initialCapital << std::endl;
+            std::cout << "Using custom initial capital: " << initialCapital << std::endl;
         } catch (const std::exception& e) {
             return std::unexpected(
                 std::string("Invalid initial_capital parameter: ") + e.what());
@@ -1640,7 +1640,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     std::cout << "Portfolio: " << portfolioInfo.name << std::endl;
     std::cout << "Period: " << fromDateResult.value()
               << " to " << toDateResult.value() << std::endl;
-    std::cout << "Initial Capital: $" << std::fixed << std::setprecision(2)
+    std::cout << "Initial Capital: " << std::fixed << std::setprecision(2)
               << initialCapital << std::endl;
     std::cout << "Instruments: " << portfolioInfo.instruments.size() << std::endl;
 

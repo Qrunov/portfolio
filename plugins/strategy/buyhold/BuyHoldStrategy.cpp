@@ -150,9 +150,9 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
                 double capitalGain = (price - lot.costBasis) * soldFromLot;
 
                 std::cout << "    Tax lot: " << soldFromLot << " shares, "
-                          << "basis $" << std::fixed << std::setprecision(2)
+                          << "basis " << std::fixed << std::setprecision(2)
                           << lot.costBasis << ", "
-                          << "gain $" << capitalGain << std::endl;
+                          << "gain " << capitalGain << std::endl;
 
                 lot.quantity -= soldFromLot;
                 remainingToSell -= soldFromLot;

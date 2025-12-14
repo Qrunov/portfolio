@@ -176,8 +176,8 @@ std::expected<double, std::string> BasePortfolioStrategy::getDividend(
             auto time = std::chrono::system_clock::to_time_t(context.currentDate);
             std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
                       << "  💰 Dividend: " << instrumentId
-                      << " $" << std::fixed << std::setprecision(2)
-                      << dividend.amount << " x " << shares << " shares = $"
+                      << " " << std::fixed << std::setprecision(2)
+                      << dividend.amount << " x " << shares << " shares = "
                       << dividendAmount << std::endl;
         }
     }
@@ -447,7 +447,7 @@ void BasePortfolioStrategy::printBacktestHeader(
         endDate - startDate);
 
     std::cout << "Period: " << (duration.count() / 24) << " days" << std::endl;
-    std::cout << "Initial Capital: $" << std::fixed << std::setprecision(2)
+    std::cout << "Initial Capital: " << std::fixed << std::setprecision(2)
               << initialCapital << std::endl;
     std::cout << "Instruments: " << params.instrumentIds.size() << std::endl;
 
@@ -525,9 +525,9 @@ std::expected<void, std::string> BasePortfolioStrategy::collectCash(
                 std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
                           << "  📤 SELL: " << instrumentId
                           << " " << std::fixed << std::setprecision(0)
-                          << sellResult->sharesTraded << " shares @ $"
+                          << sellResult->sharesTraded << " shares @ "
                           << std::setprecision(2) << sellResult->price
-                          << " = $" << sellResult->totalAmount;
+                          << " = " << sellResult->totalAmount;
 
                 if (!sellResult->reason.empty()) {
                     std::cout << " (" << sellResult->reason << ")";
@@ -557,9 +557,9 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
             std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
                       << "  📥 BUY:  " << instrumentId
                       << " " << std::fixed << std::setprecision(0)
-                      << buyResult->sharesTraded << " shares @ $"
+                      << buyResult->sharesTraded << " shares @ "
                       << std::setprecision(2) << buyResult->price
-                      << " = $" << buyResult->totalAmount
+                      << " = " << buyResult->totalAmount
                       << "context.cashBalance = " <<  context.cashBalance;
 
             if (!buyResult->reason.empty()) {
@@ -760,7 +760,7 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
 
     std::cout << "\nPerformance Metrics:" << std::endl;
     std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
-    std::cout << "  Final Value:         $" << std::fixed << std::setprecision(2)
+    std::cout << "  Final Value:         " << std::fixed << std::setprecision(2)
               << result.finalValue << std::endl;
     std::cout << "  Total Return:        " << std::setprecision(2)
               << result.totalReturn << "%" << std::endl;
@@ -771,7 +771,7 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
         std::cout << "\nInflation-Adjusted Metrics:" << std::endl;
         std::cout << "  Cumulative Inflation:" << std::setprecision(2)
                   << result.cumulativeInflation << "%" << std::endl;
-        std::cout << "  Real Final Value:    $" << std::fixed << std::setprecision(2)
+        std::cout << "  Real Final Value:    " << std::fixed << std::setprecision(2)
                   << result.realFinalValue << std::endl;
         std::cout << "  Real Total Return:   " << std::setprecision(2)
                   << result.realTotalReturn << "%" << std::endl;
@@ -789,7 +789,7 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
 
     if (result.totalDividends > 0) {
         std::cout << "\nDividend Metrics:" << std::endl;
-        std::cout << "  Total Dividends:     $" << std::fixed << std::setprecision(2)
+        std::cout << "  Total Dividends:     " << std::fixed << std::setprecision(2)
                   << result.totalDividends << std::endl;
         std::cout << "  Dividend Yield:      " << std::setprecision(2)
                   << result.dividendYield << "%" << std::endl;

@@ -116,7 +116,12 @@ install(FILES
     DESTINATION lib/cmake/PortfolioManagement
 )
 
-install(FILES ${CMAKE_SOURCE_DIR}/database/portfolio_sample.db  DESTINATION ${CMAKE_INSTALL_DATADIR})
+install(FILES ${CMAKE_BINARY_DIR}/portfolio_sample.db  DESTINATION ${CMAKE_INSTALL_DATADIR})
+
+file(ARCHIVE_EXTRACT
+    INPUT ${CMAKE_SOURCE_DIR}/database/portfolio_sample.db.tar.gz 
+    DESTINATION  ${CMAKE_BINARY_DIR}
+)
 
 set(CPACK_GENERATOR DEB)
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")

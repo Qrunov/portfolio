@@ -130,6 +130,13 @@ set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-Linux")
 set(CPACK_PACKAGE_CONTACT example@example.com)
+
+# Включите автоматическое определение зависимостей
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON)
+
+# Установите контрольные уровни
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_STRICT_LEVEL 1)  # 0-3: 0=минимальный, 3=строгий
 include(CPack)
 
 # ============================================================================

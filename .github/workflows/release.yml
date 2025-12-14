@@ -6,6 +6,9 @@ on:
       - main
       - feature/github_actions
 
+permissions:
+     contents: write  # Без этого не будет работать create-release
+
 jobs:
   build:
     runs-on: ubuntu-latest

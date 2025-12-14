@@ -21,7 +21,7 @@ CommandExecutor::CommandExecutor(std::shared_ptr<IPortfolioDatabase> db)
 
     // Инициализируем PluginManager
     const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
-    std::string searchPath = pluginPath ? pluginPath : "./plugins";
+    std::string searchPath = pluginPath ? pluginPath : "/usr/lib/portfolio/plugins";
     //TODO переименовать в databasepluginManager_
     pluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
 
@@ -93,7 +93,15 @@ std::expected<TimePoint, std::string> CommandExecutor::parseDateString(
     tm.tm_sec = 0;
     tm.tm_isdst = -1;
 
-    auto timeT = std::mktime(&tm);
+#ifdef _WIN32
+    // Windows: используем _mkgmtime
+    auto timeT = _mkgmtime(&tm);
+#else
+    // POSIX/Linux: используем timegm
+    auto timeT = timegm(&tm);
+#endif
+
+//    auto timeT = std::mktime(&tm);
     return std::chrono::system_clock::from_time_t(timeT);
 }
 
@@ -182,9 +190,9 @@ void CommandExecutor::printBacktestResult(
     if (result.hasInflationData) {
         std::cout << "Inflation Adjustment:" << std::endl;
         std::cout << "  Cumulative Inflation: " << std::setprecision(2)
-                  << result.inflationRate << "%" << std::endl;
+                  << result.informationRatio << "%" << std::endl;
         std::cout << "  Real Return:          " << std::setprecision(2)
-                  << result.realReturn << "%" << std::endl;
+                  << result.realTotalReturn << "%" << std::endl;
         std::cout << "  Real Annual Return:   " << std::setprecision(2)
                   << result.realAnnualizedReturn << "%" << std::endl;
         std::cout << std::endl;
@@ -211,6 +219,7 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
     std::string config;
 
     // Простое отображение типа -> имя плагина
+    //TODO: убрать прямое сопоставление, грузить по имени файла без расширения
     if (dbType == "InMemory") {
         pluginName = "inmemory_db";
         config = "";
@@ -1662,7 +1671,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     // Вывод результатов
     // ════════════════════════════════════════════════════════════════════════
 
-    printBacktestResult(backtestResult.value());
+//    printBacktestResult(backtestResult.value());
 
     return {};
 }

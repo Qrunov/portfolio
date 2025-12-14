@@ -1,4 +1,3 @@
-// BasePortfolioStrategy.hpp
 #pragma once
 
 #include "IPortfolioStrategy.hpp"
@@ -65,6 +64,7 @@ public:
 
     // Объявления методов установки (реализация в .cpp)
     void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override;
+
     void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override;
 
     BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
@@ -119,7 +119,16 @@ protected:
         std::size_t dayIndex,
         std::size_t rebalancePeriod) const noexcept;
 
-    // Вспомогательные методы для работы с данными
+    // Вспомогательные методы
+    TimePoint normalizeToDate(const TimePoint& timestamp) const;
+
+    double calculatePortfolioValue(const TradingContext& context) const;
+
+    std::expected<double, std::string> getPrice(
+        const std::string& instrumentId,
+        const TimePoint& date,
+        const TradingContext& context) const;
+
     std::expected<void, std::string> loadPriceData(
         const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
@@ -132,55 +141,16 @@ protected:
         const TimePoint& endDate,
         std::map<std::string, std::vector<DividendPayment>>& dividendData);
 
-    double calculatePortfolioValue(
-        const TradingContext& context) const;
-
-    // Получение цены инструмента на определенную дату
-    std::expected<double, std::string> getPrice(
-        const std::string& instrumentId,
-        const TimePoint& date,
-        const TradingContext& context) const;
-
-    // Нормализация даты к началу дня (убирает время)
-    TimePoint normalizeToDate(const TimePoint& timestamp) const;
+    std::map<std::string, std::string> getDefaultParameters() const override;
 
     // ════════════════════════════════════════════════════════════════════════
-    // Параметры по умолчанию
-    // ════════════════════════════════════════════════════════════════════════
-
-    std::map<std::string, std::string> getDefaultParameters() const override {
-        std::map<std::string, std::string> defaults;
-
-        // Trading Calendar
-        defaults["calendar"] = "IMOEX";
-
-        // Inflation Adjustment
-        defaults["inflation"] = "INF";
-
-        // Tax Calculation (Russian NDFL)
-        defaults["tax"] = "false";
-        defaults["ndfl_rate"] = "0.13";
-        defaults["long_term_exemption"] = "true";
-        defaults["lot_method"] = "FIFO";
-        defaults["import_losses"] = "0";
-
-        // Risk-free rate
-        defaults["risk_free_rate"] = "7.0";
-        defaults["risk_free_instrument"] = "";
-
-        // Rebalance period (in days, 0 = no rebalancing)
-        defaults["rebalance_period"] = "0";
-
-        return defaults;
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Защищенные члены класса
+    // Защищенные поля (доступны наследникам)
     // ════════════════════════════════════════════════════════════════════════
 
     std::shared_ptr<IPortfolioDatabase> database_ = nullptr;
     std::shared_ptr<TaxCalculator> taxCalculator_ = nullptr;
     std::unique_ptr<TradingCalendar> calendar_ = nullptr;
+    std::unique_ptr<InflationAdjuster> inflationAdjuster_ = nullptr;
 
     // Хранилище налоговых лотов
     std::map<std::string, std::vector<TaxLot>> instrumentLots_;
@@ -197,6 +167,11 @@ private:
         double initialCapital) const;
 
     std::expected<void, std::string> initializeTradingCalendar(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate);
+
+    std::expected<void, std::string> initializeInflationAdjuster(
         const PortfolioParams& params,
         const TimePoint& startDate,
         const TimePoint& endDate);
@@ -235,5 +210,4 @@ private:
 
     void printFinalSummary(const BacktestResult& result) const;
 };
-
-} // namespace portfolio
+}

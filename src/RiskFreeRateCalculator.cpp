@@ -12,8 +12,9 @@ RiskFreeRateCalculator RiskFreeRateCalculator::fromRate(
     RiskFreeRateCalculator calc;
     calc.useInstrument_ = false;
 
-    // ✅ ПРАВИЛЬНО: Конвертируем годовую ставку в дневную
+    //Конвертируем годовую ставку в дневную
     // Формула: r_daily = (1 + r_annual)^(1/252) - 1
+    //TODO: почему 252, кол - во торговых дней меняется год от года, здесь надо подумать как првильно посчитать ежедневую ставку, на основе константной ставки
     double dailyRate = std::pow(1.0 + annualRate, 1.0 / 252.0) - 1.0;
 
     // Заполняем вектор дневными доходностями

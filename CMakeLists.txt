@@ -131,7 +131,7 @@ set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-Linux")
 set(CPACK_PACKAGE_CONTACT example@example.com)
 
-# Включите автоматическое определение зависимостей
+# Включение автоматического определения зависимостей
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON)
 

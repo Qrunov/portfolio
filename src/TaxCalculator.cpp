@@ -188,6 +188,7 @@ bool TaxCalculator::isLongTermHolding(
 
     // 3 года = 3 * 365.25 дней = 1095.75 дней
     // Добавляем небольшой запас для учёта високосных лет
+    //TODO: здесь можно посчитать точно, не пребегая к эвристикам
     constexpr double threeYearsInHours = 3.0 * 365.25 * 24.0;
 
     return duration.count() > threeYearsInHours;

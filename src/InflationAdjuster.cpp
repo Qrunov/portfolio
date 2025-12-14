@@ -50,11 +50,16 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
 
     // Загружаем данные по инфляции
     // Расширяем диапазон на месяц назад и вперёд для полного покрытия
-    auto expandedStart = startDate - std::chrono::hours(24 * 31);
-    auto expandedEnd = endDate + std::chrono::hours(24 * 31);
+//  auto expandedStart = startDate - std::chrono::hours(24 * 31);
+//  auto expandedEnd = endDate + std::chrono::hours(24 * 31);
+
+//    auto inflationData = database->getAttributeHistory(
+//        instrumentId, "close", expandedStart, expandedEnd, "");
+    //TODO: здесь startDate нужно приводить к началу месяца, иначе не выберем первый месяц
+
 
     auto inflationData = database->getAttributeHistory(
-        instrumentId, "close", expandedStart, expandedEnd, "");
+        instrumentId, "close", startDate, endDate, "");
 
     if (!inflationData || inflationData->empty()) {
         std::cout << "⚠ No inflation data found for " << instrumentId << std::endl;
@@ -111,6 +116,8 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
     time = std::chrono::system_clock::to_time_t(dataEnd);
     std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d") << std::endl;
 
+    //TODO: надо подрезать краевые месяцы, посчитав для них ежедневную инфляцию и скорректировать месячное значение вычтя дни за границами интервала
+
     // Показываем примеры данных
     if (monthlyInflation.size() <= 6) {
         std::cout << "\n  Monthly inflation rates:" << std::endl;
@@ -152,14 +159,41 @@ double InflationAdjuster::getCumulativeInflation(
         return 0.0;
     }
 
+    // Получаем год и месяц для начала и конца периода
+    auto startTimeT = std::chrono::system_clock::to_time_t(startDate);
+    auto endTimeT = std::chrono::system_clock::to_time_t(endDate);
+
+    std::tm startTm;
+    std::tm endTm;
+
+#ifdef _WIN32
+    gmtime_s(&startTm, &startTimeT);
+    gmtime_s(&endTm, &endTimeT);
+#else
+    gmtime_r(&startTimeT, &startTm);
+    gmtime_r(&endTimeT, &endTm);
+#endif
+
+    int startYear = startTm.tm_year + 1900;
+    int startMonth = startTm.tm_mon;  // 0-11
+    int endYear = endTm.tm_year + 1900;
+    int endMonth = endTm.tm_mon;      // 0-11
+
     // Итерируемся по месяцам периода
-    auto current = startDate;
     double cumulativeInflation = 1.0;  // Начинаем с 1.0 (100%)
 
-    // CRITICAL FIX #1: Изменено с < на <=
-    // Без этого последний месяц не учитывается!
-    while (current <= endDate) {
-        std::string monthKey = getMonthKey(current);
+    int currentYear = startYear;
+    int currentMonth = startMonth;
+
+    // Проходим по всем месяцам включительно
+    while (currentYear < endYear || (currentYear == endYear && currentMonth <= endMonth)) {
+        // Формируем ключ месяца YYYY-MM
+        std::ostringstream oss;
+        oss << currentYear << "-"
+            << std::setfill('0') << std::setw(2) << (currentMonth + 1);
+        std::string monthKey = oss.str();
+
+        // Получаем инфляцию за месяц
         double monthlyRate = getMonthlyInflation(monthKey);
 
         // Применяем месячную инфляцию
@@ -167,47 +201,16 @@ double InflationAdjuster::getCumulativeInflation(
         cumulativeInflation *= (1.0 + monthlyRate / 100.0);
 
         // Переходим к следующему месяцу
-        auto timeT = std::chrono::system_clock::to_time_t(current);
-
-        // CRITICAL FIX #2: Используем gmtime_r вместо localtime!
-        // localtime конвертирует в локальное время
-        // gmtime_r конвертирует в UTC
-        std::tm tm;
-#ifdef _WIN32
-        gmtime_s(&tm, &timeT);
-#else
-        gmtime_r(&timeT, &tm);
-#endif
-
-        tm.tm_mon += 1;
-        if (tm.tm_mon > 11) {
-            tm.tm_mon = 0;
-            tm.tm_year += 1;
+        currentMonth++;
+        if (currentMonth > 11) {
+            currentMonth = 0;
+            currentYear++;
         }
-
-// CRITICAL FIX #3: Используем timegm вместо mktime!
-// mktime интерпретирует tm как localtime
-// timegm интерпретирует tm как UTC
-#ifdef _WIN32
-        auto newTimeT = _mkgmtime(&tm);
-#else
-        auto newTimeT = timegm(&tm);
-#endif
-
-        if (newTimeT == -1) {
-            // Если конвертация не удалась, прерываем цикл
-            break;
-        }
-
-        current = std::chrono::system_clock::from_time_t(newTimeT);
     }
 
     // Возвращаем процентное изменение
     return (cumulativeInflation - 1.0) * 100.0;
 }
-
-
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Корректировка номинальной доходности
@@ -248,14 +251,12 @@ std::string InflationAdjuster::getMonthKey(const TimePoint& date) noexcept
 {
     auto timeT = std::chrono::system_clock::to_time_t(date);
 
-    // CRITICAL FIX: Используем gmtime_r вместо localtime!
-    // localtime конвертирует в локальное время
-    // gmtime_r конвертирует в UTC
+
     std::tm tm;
 #ifdef _WIN32
-    gmtime_s(&tm, &timeT);  // Windows: gmtime_s
+    gmtime_s(&tm, &timeT);
 #else
-    gmtime_r(&timeT, &tm);  // POSIX: gmtime_r
+    gmtime_r(&timeT, &tm);
 #endif
 
     std::ostringstream oss;

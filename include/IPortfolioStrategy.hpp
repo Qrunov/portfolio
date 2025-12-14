@@ -48,21 +48,47 @@ public:
         double taxEfficiency = 0.0;
         TaxSummary taxSummary;
 
+        // ════════════════════════════════════════════════════════════════════
+        // Корректировка на инфляцию
+        // ════════════════════════════════════════════════════════════════════
+
+        // Кумулятивная инфляция за период (в процентах)
+        double cumulativeInflation = 0.0;
+
+        // Реальная доходность с учетом инфляции (в процентах)
+        // Формула Фишера: (1 + nominal) / (1 + inflation) - 1
+        double realTotalReturn = 0.0;
+
+        // Реальная годовая доходность с учетом инфляции (в процентах)
+        double realAnnualizedReturn = 0.0;
+
+        // Реальная стоимость портфеля с учетом инфляции
+        double realFinalValue = 0.0;
+
+        // Флаг наличия данных по инфляции
+        bool hasInflationData = false;
+
         // Корректировки дат
         std::vector<DateAdjustment> dateAdjustments;
 
-        // ═══════════════════════════════════════════════════════════════════
-        // Инфляция (добавлено)
-        // ═══════════════════════════════════════════════════════════════════
-        bool hasInflationData = false;
-        double inflationRate = 0.0;              // Совокупная инфляция за период (%)
-        double realReturn = 0.0;                 // Реальная доходность (%)
-        double realAnnualizedReturn = 0.0;       // Реальная годовая доходность (%)
+        // ════════════════════════════════════════════════════════════════════
+        // Бенчмаркинг (опционально)
+        // ════════════════════════════════════════════════════════════════════
+
+        std::string benchmarkId;
+        double benchmarkReturn = 0.0;
+        double alpha = 0.0;
+        double beta = 0.0;
+        double correlation = 0.0;
+        double trackingError = 0.0;
+        double informationRatio = 0.0;
+
     };
 
     struct PortfolioParams {
         std::vector<std::string> instrumentIds;
         std::map<std::string, double> weights;
+        //TODO: и начальный размер капитала и флаг реинвистирования дивидендов необходимо перенести в словарь параметров портфеля
         double initialCapital = 0.0;
         bool reinvestDividends = true;
 

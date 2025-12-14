@@ -8,20 +8,13 @@
 namespace portfolio {
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ИНИЦИАЛИЗАЦИЯ СТРАТЕГИИ: Пустая (для BuyHold не требуется)
+// ИНИЦИАЛИЗАЦИЯ СТРАТЕГИИ
 // ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<void, std::string> BuyHoldStrategy::initializeStrategy(
     TradingContext& /* context */,
     const PortfolioParams& /* params */)
 {
-    // ════════════════════════════════════════════════════════════════════════
-    // BuyHold: не требует специальной инициализации
-    // Покупка происходит через buy() на общих основаниях
-    // ════════════════════════════════════════════════════════════════════════
-
-    std::cout << "BuyHold: No special initialization required" << std::endl;
-
     return {};
 }
 
@@ -48,7 +41,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     double currentShares = context.holdings[instrumentId];
 
     // ════════════════════════════════════════════════════════════════════════
-    // Получаем цену на текущую дату (без подгонки!)
+    // Получаем цену на текущую дату
     // ════════════════════════════════════════════════════════════════════════
 
     if (!context.priceData.count(instrumentId)) {
@@ -57,6 +50,8 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
 
     auto priceIt = context.priceData[instrumentId].find(context.currentDate);
     if (priceIt == context.priceData[instrumentId].end()) {
+        //TODO: проверить, если это последний день, то продаем все по последней известной цене
+        //TODO: проверить, если цен у бумаги в будующем нет(делистинг,конец истории), то продаем по последней
         return result;  // Нет цены на эту дату - ничего не делаем
     }
 
@@ -71,24 +66,30 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
 
     // Случай 1: Последний день - продаем всё
     if (context.isLastDay) {
+
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
         reason = "end of period";
     }
     // Случай 2: Делистинг - продаем всё
+    //TODO: неверное условие: делистинг если для инструмента нет цен для дат больше текущей
     else if (context.priceData.count(instrumentId)) {
+
         const auto& prices = context.priceData[instrumentId];
+        //TODO: зачем здесь max искать? prices -это map -> масимальная дата - последний элемент
         auto maxDate = std::max_element(
             prices.begin(), prices.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
 
+        //TODO: текущая дата может больше последней даты инструмента
         if (maxDate != prices.end() && maxDate->first == context.currentDate) {
             sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
             reason = "delisting";
         }
     }
     // Случай 3: День ребалансировки - продаем излишек
-    else if (context.isRebalanceDay) {
+    /*else*/ if (context.isRebalanceDay) {
         // Получаем целевой вес
+
         double targetWeight = 1.0 / params.instrumentIds.size();
         if (params.weights.count(instrumentId)) {
             targetWeight = params.weights.at(instrumentId);
@@ -140,6 +141,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     // Налоговый расчет, если нужно
     if (taxCalculator_ && context.taxLots.count(instrumentId)) {
         auto& lots = context.taxLots[instrumentId];
+        //TODO: здесь как раз самое время задействовать taxCalculator_ - recordSale()
         double remainingToSell = static_cast<double>(sharesToSell);
 
         for (auto& lot : lots) {

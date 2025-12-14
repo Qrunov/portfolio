@@ -1,15 +1,12 @@
 #pragma once
 
 #include "IPortfolioStrategy.hpp"
-#include "IPortfolioDatabase.hpp"
-#include "TaxCalculator.hpp"
 #include "TradingCalendar.hpp"
 #include "InflationAdjuster.hpp"
-#include "RiskFreeRateCalculator.hpp"
+#include <memory>
 #include <map>
 #include <vector>
-#include <memory>
-#include <iostream>
+#include <expected>
 
 namespace portfolio {
 
@@ -31,6 +28,7 @@ struct TradingContext {
     std::size_t dayIndex;
     bool isRebalanceDay;
     bool isLastDay;
+    bool isReinvestment = false;  // ✅ Режим реинвестирования свободного кэша
     double cashBalance;
     std::map<std::string, double> holdings;
     std::map<std::string, std::map<TimePoint, double>> priceData;
@@ -52,26 +50,41 @@ struct TradeResult {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Базовый класс стратегии портфеля
+// ✅ НОВЫЕ СТРУКТУРЫ для улучшенной обработки
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct InstrumentPriceInfo {
+    bool hasData = false;
+    TimePoint firstAvailableDate;
+    TimePoint lastAvailableDate;
+    double lastKnownPrice = 0.0;
+};
+
+struct TradingDayInfo {
+    TimePoint currentDate;
+    TimePoint previousTradingDate;
+    bool isLastDayOfYear = false;
+    bool isLastDayOfBacktest = false;
+    int year = 0;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Base Portfolio Strategy
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class BasePortfolioStrategy : public IPortfolioStrategy {
 public:
-    // Конструктор по умолчанию
     BasePortfolioStrategy() = default;
-
     ~BasePortfolioStrategy() override = default;
 
-    // Объявления методов установки (реализация в .cpp)
     void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override;
-
     void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override;
 
     BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
     BasePortfolioStrategy& operator=(const BasePortfolioStrategy&) = delete;
 
     // ════════════════════════════════════════════════════════════════════════
-    // ШАБЛОННЫЙ МЕТОД BACKTEST (Template Method Pattern)
+    // ШАБЛОННЫЙ МЕТОД BACKTEST
     // ════════════════════════════════════════════════════════════════════════
 
     std::expected<BacktestResult, std::string> backtest(
@@ -81,25 +94,21 @@ public:
         double initialCapital) override final;
 
 protected:
-
     // ════════════════════════════════════════════════════════════════════════
-    // Виртуальные методы для переопределения в наследниках
+    // Виртуальные методы для наследников
     // ════════════════════════════════════════════════════════════════════════
 
-    // Инициализация стратегии (хук для сложных стратегий)
     virtual std::expected<void, std::string> initializeStrategy(
         TradingContext& /* context */,
         const PortfolioParams& /* params */) {
         return {};
     }
 
-    // Продажа активов (чисто виртуальная)
     virtual std::expected<TradeResult, std::string> sell(
         const std::string& instrumentId,
         TradingContext& context,
         const PortfolioParams& params) = 0;
 
-    // Покупка активов (чисто виртуальная)
     virtual std::expected<TradeResult, std::string> buy(
         const std::string& instrumentId,
         TradingContext& context,
@@ -109,17 +118,16 @@ protected:
     // Базовые невиртуальные методы
     // ════════════════════════════════════════════════════════════════════════
 
-    // Обработка дивидендов (базовая реализация)
+    // ✅ TODO #21, #22, #23: Улучшенная обработка дивидендов
     std::expected<double, std::string> getDividend(
         const std::string& instrumentId,
-        TradingContext& context);
+        TradingContext& context,
+        const TimePoint& previousTradingDate);
 
-    // Определение дня ребалансировки
     bool isRebalanceDay(
         std::size_t dayIndex,
         std::size_t rebalancePeriod) const noexcept;
 
-    // Вспомогательные методы
     TimePoint normalizeToDate(const TimePoint& timestamp) const;
 
     double calculatePortfolioValue(const TradingContext& context) const;
@@ -127,6 +135,17 @@ protected:
     std::expected<double, std::string> getPrice(
         const std::string& instrumentId,
         const TimePoint& date,
+        const TradingContext& context) const;
+
+    // ✅ TODO #24, #25, #26, #27, #28: Улучшенное определение делистинга
+    std::expected<double, std::string> getLastAvailablePrice(
+        const std::string& instrumentId,
+        const TimePoint& currentDate,
+        const TradingContext& context) const;
+
+    bool isDelisted(
+        const std::string& instrumentId,
+        const TimePoint& currentDate,
         const TradingContext& context) const;
 
     std::expected<void, std::string> loadPriceData(
@@ -143,8 +162,12 @@ protected:
 
     std::map<std::string, std::string> getDefaultParameters() const override;
 
+    InstrumentPriceInfo getInstrumentPriceInfo(
+        const std::string& instrumentId,
+        const TradingContext& context) const;
+
     // ════════════════════════════════════════════════════════════════════════
-    // Защищенные поля (доступны наследникам)
+    // Защищенные поля
     // ════════════════════════════════════════════════════════════════════════
 
     std::shared_ptr<IPortfolioDatabase> database_ = nullptr;
@@ -152,12 +175,11 @@ protected:
     std::unique_ptr<TradingCalendar> calendar_ = nullptr;
     std::unique_ptr<InflationAdjuster> inflationAdjuster_ = nullptr;
 
-    // Хранилище налоговых лотов
-    std::map<std::string, std::vector<TaxLot>> instrumentLots_;
+    double totalTaxesPaidDuringBacktest_ = 0.0;
 
 private:
     // ════════════════════════════════════════════════════════════════════════
-    // Приватные методы шаблонного метода
+    // Приватные методы
     // ════════════════════════════════════════════════════════════════════════
 
     std::expected<void, std::string> validateInputParameters(
@@ -185,6 +207,7 @@ private:
     std::expected<void, std::string> processTradingDay(
         TradingContext& context,
         const PortfolioParams& params,
+        const TradingDayInfo& dayInfo,
         std::vector<double>& dailyValues,
         double& totalDividendsReceived,
         std::size_t& dividendPaymentsCount);
@@ -192,12 +215,24 @@ private:
     std::expected<void, std::string> collectCash(
         TradingContext& context,
         const PortfolioParams& params,
+        const TradingDayInfo& dayInfo,
         double& totalDividendsReceived,
         std::size_t& dividendPaymentsCount);
 
     std::expected<void, std::string> deployCapital(
         TradingContext& context,
         const PortfolioParams& params);
+
+    // ✅ TODO #18, #19, #20: Обработка налогов на конец года
+    std::expected<void, std::string> processYearEndTaxes(
+        TradingContext& context,
+        const PortfolioParams& params,
+        const TradingDayInfo& dayInfo);
+
+    std::expected<double, std::string> rebalanceForTaxPayment(
+        TradingContext& context,
+        const PortfolioParams& params,
+        double taxOwed);
 
     BacktestResult calculateFinalResults(
         const std::vector<double>& dailyValues,
@@ -209,5 +244,12 @@ private:
         const PortfolioParams& params) const;
 
     void printFinalSummary(const BacktestResult& result) const;
+
+    bool isLastTradingDayOfYear(
+        const TimePoint& currentDate,
+        const TimePoint& nextTradingDate) const;
+
+    int getYear(const TimePoint& date) const;
 };
-}
+
+} // namespace portfolio

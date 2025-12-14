@@ -1,4 +1,4 @@
-// BuyHoldStrategy.cpp
+// plugins/strategy/buyhold/BuyHoldStrategy.cpp
 #include "BuyHoldStrategy.hpp"
 #include <iostream>
 #include <iomanip>
@@ -19,7 +19,7 @@ std::expected<void, std::string> BuyHoldStrategy::initializeStrategy(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ПРОДАЖА: Закрытие позиций или ребалансировка
+// ✅ УЛУЧШЕННАЯ ПРОДАЖА (TODO #24, #25, #26, #27, #28, #29)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
@@ -34,62 +34,66 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     // ════════════════════════════════════════════════════════════════════════
 
     if (!context.holdings.count(instrumentId) ||
-        context.holdings[instrumentId] <= 0) {
-        return result;  // Нет позиции для продажи
+        context.holdings[instrumentId] <= 0.0001) {
+        return result;
     }
 
     double currentShares = context.holdings[instrumentId];
 
     // ════════════════════════════════════════════════════════════════════════
-    // Получаем цену на текущую дату
+    // ✅ TODO #24, #25, #27, #28: Улучшенное получение цены
     // ════════════════════════════════════════════════════════════════════════
 
-    if (!context.priceData.count(instrumentId)) {
-        return result;  // Нет данных о ценах
-    }
+    double price = 0.0;
+    bool useLastKnownPrice = false;
 
-    auto priceIt = context.priceData[instrumentId].find(context.currentDate);
-    if (priceIt == context.priceData[instrumentId].end()) {
-        //TODO: проверить, если это последний день, то продаем все по последней известной цене
-        //TODO: проверить, если цен у бумаги в будующем нет(делистинг,конец истории), то продаем по последней
-        return result;  // Нет цены на эту дату - ничего не делаем
-    }
+    // Сначала пытаемся получить цену на текущую дату
+    auto priceResult = getPrice(instrumentId, context.currentDate, context);
 
-    double price = priceIt->second;
+    if (priceResult) {
+        price = *priceResult;
+    } else {
+        // ✅ TODO #24, #25: Если нет цены - берем последнюю известную
+        auto lastPriceResult = getLastAvailablePrice(
+            instrumentId, context.currentDate, context);
+
+        if (!lastPriceResult) {
+            // Вообще нет данных о ценах
+            return result;
+        }
+
+        price = *lastPriceResult;
+        useLastKnownPrice = true;
+    }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Определяем причину продажи и количество акций
+    // Определяем причину и количество продажи
     // ════════════════════════════════════════════════════════════════════════
 
     std::size_t sharesToSell = 0;
     std::string reason;
 
-    // Случай 1: Последний день - продаем всё
+    // ✅ TODO #24: Случай 1 - Последний день бэктеста
     if (context.isLastDay) {
-
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
-        reason = "end of period";
+        reason = "end of backtest";
     }
-    // Случай 2: Делистинг - продаем всё
-    //TODO: неверное условие: делистинг если для инструмента нет цен для дат больше текущей
-    else if (context.priceData.count(instrumentId)) {
+    // ✅ TODO #25, #26, #28: Случай 2 - Делистинг
+    else if (isDelisted(instrumentId, context.currentDate, context)) {
+        sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
+        reason = "delisting";
 
-        const auto& prices = context.priceData[instrumentId];
-        //TODO: зачем здесь max искать? prices -это map -> масимальная дата - последний элемент
-        auto maxDate = std::max_element(
-            prices.begin(), prices.end(),
-            [](const auto& a, const auto& b) { return a.first < b.first; });
+        auto priceInfo = getInstrumentPriceInfo(instrumentId, context);
+        auto lastDate = std::chrono::system_clock::to_time_t(priceInfo.lastAvailableDate);
+        auto currentDate = std::chrono::system_clock::to_time_t(context.currentDate);
 
-        //TODO: текущая дата может больше последней даты инструмента
-        if (maxDate != prices.end() && maxDate->first == context.currentDate) {
-            sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
-            reason = "delisting";
-        }
+        std::cout << "   ℹ️  " << instrumentId << " delisted: "
+                  << "last price date " << std::put_time(std::localtime(&lastDate), "%Y-%m-%d")
+                  << ", current date " << std::put_time(std::localtime(&currentDate), "%Y-%m-%d")
+                  << std::endl;
     }
-    // Случай 3: День ребалансировки - продаем излишек
-    /*else*/ if (context.isRebalanceDay) {
-        // Получаем целевой вес
-
+    // Случай 3 - Ребалансировка
+    else if (context.isRebalanceDay) {
         double targetWeight = 1.0 / params.instrumentIds.size();
         if (params.weights.count(instrumentId)) {
             targetWeight = params.weights.at(instrumentId);
@@ -99,19 +103,23 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
         double totalPortfolioValue = context.cashBalance;
 
         for (const auto& [instId, shares] : context.holdings) {
-            if (shares > 0 && context.priceData.count(instId)) {
-                auto instPriceIt = context.priceData[instId].find(context.currentDate);
-                if (instPriceIt != context.priceData[instId].end()) {
-                    totalPortfolioValue += shares * instPriceIt->second;
+            if (shares > 0.0 && context.priceData.count(instId)) {
+                auto instPriceResult = getPrice(instId, context.currentDate, context);
+                if (instPriceResult) {
+                    totalPortfolioValue += shares * (*instPriceResult);
+                } else {
+                    // Используем последнюю известную цену
+                    auto lastPrice = getLastAvailablePrice(instId, context.currentDate, context);
+                    if (lastPrice) {
+                        totalPortfolioValue += shares * (*lastPrice);
+                    }
                 }
             }
         }
 
-        // Рассчитываем текущую и целевую стоимость позиции
         double currentValue = currentShares * price;
         double targetValue = totalPortfolioValue * targetWeight;
 
-        // Если текущая стоимость превышает целевую - продаем излишек
         if (currentValue > targetValue) {
             double excessValue = currentValue - targetValue;
             double excessShares = excessValue / price;
@@ -120,12 +128,12 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
         }
     }
 
-    // Если нечего продавать - выходим
+    // Если нечего продавать
     if (sharesToSell == 0) {
         return result;
     }
 
-    // Не можем продать больше, чем имеем
+    // Не можем продать больше чем есть
     if (sharesToSell > static_cast<std::size_t>(std::floor(currentShares))) {
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
     }
@@ -133,44 +141,61 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     double totalAmount = sharesToSell * price;
 
     // ════════════════════════════════════════════════════════════════════════
-    // Выполняем продажу
+    // ✅ TODO #29: Налоговый расчет через TaxCalculator
     // ════════════════════════════════════════════════════════════════════════
 
-    context.holdings[instrumentId] -= sharesToSell;
-
-    // Налоговый расчет, если нужно
     if (taxCalculator_ && context.taxLots.count(instrumentId)) {
         auto& lots = context.taxLots[instrumentId];
-        //TODO: здесь как раз самое время задействовать taxCalculator_ - recordSale()
+
+        // ✅ TODO #29: Используем taxCalculator_->recordSale()
+        auto taxResult = taxCalculator_->recordSale(
+            instrumentId,
+            static_cast<double>(sharesToSell),
+            price,
+            context.currentDate,
+            lots);
+
+        if (!taxResult) {
+            std::cout << "   ⚠️  Tax recording failed: " << taxResult.error() << std::endl;
+        }
+
+        // Обновляем лоты после продажи
         double remainingToSell = static_cast<double>(sharesToSell);
 
         for (auto& lot : lots) {
-            if (lot.quantity > 0 && remainingToSell > 0) {
-                double soldFromLot = std::min(lot.quantity, remainingToSell);
-                double capitalGain = (price - lot.costBasis) * soldFromLot;
+            if (remainingToSell <= 0.0001) break;
+            if (lot.quantity <= 0.0001) continue;
 
-                std::cout << "    Tax lot: " << soldFromLot << " shares, "
-                          << "basis " << std::fixed << std::setprecision(2)
-                          << lot.costBasis << ", "
-                          << "gain " << capitalGain << std::endl;
-
-                lot.quantity -= soldFromLot;
-                remainingToSell -= soldFromLot;
-            }
+            double soldFromLot = std::min(lot.quantity, remainingToSell);
+            lot.quantity -= soldFromLot;
+            remainingToSell -= soldFromLot;
         }
+
+        // Удаляем пустые лоты
+        lots.erase(
+            std::remove_if(lots.begin(), lots.end(),
+                           [](const TaxLot& lot) { return lot.quantity < 0.0001; }),
+            lots.end());
     }
 
+    // ════════════════════════════════════════════════════════════════════════
     // Формируем результат
-    result.sharesTraded = static_cast<double>(sharesToSell);
+    // ════════════════════════════════════════════════════════════════════════
+
+    result.sharesTraded = sharesToSell;
     result.price = price;
     result.totalAmount = totalAmount;
     result.reason = reason;
+
+    if (useLastKnownPrice) {
+        result.reason += " (last known price)";
+    }
 
     return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ПОКУПКА: Распределение свободного кэша с минимизацией перекоса весов
+// ПОКУПКА
 // ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
@@ -180,54 +205,71 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
 {
     TradeResult result;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Проверяем наличие свободных средств
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (context.cashBalance <= 0) {
-        return result;  // Нет денег для покупки
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Получаем цену на текущую дату (без подгонки!)
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (!context.priceData.count(instrumentId)) {
-        return result;  // Нет данных о ценах
-    }
-
-    auto priceIt = context.priceData[instrumentId].find(context.currentDate);
-    if (priceIt == context.priceData[instrumentId].end()) {
-        return result;  // Нет цены на эту дату - ничего не делаем
-    }
-
-    double price = priceIt->second;
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Проверяем делистинг: не покупаем в последний день данных
-    // ════════════════════════════════════════════════════════════════════════
-
-    const auto& prices = context.priceData[instrumentId];
-    auto maxDateIt = std::max_element(
-        prices.begin(), prices.end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; });
-
-    if (maxDateIt != prices.end() && maxDateIt->first == context.currentDate) {
-        // Это последний день данных (делистинг) - не покупаем
+    if (context.cashBalance <= 0.01) {
         return result;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Получаем целевой вес инструмента
-    // ════════════════════════════════════════════════════════════════════════
+    // Не покупаем делистованные инструменты
+    if (isDelisted(instrumentId, context.currentDate, context)) {
+        return result;
+    }
 
+    auto priceResult = getPrice(instrumentId, context.currentDate, context);
+    if (!priceResult) {
+        return result;
+    }
+
+    double price = *priceResult;
+
+    // Определяем целевой вес
     double targetWeight = 1.0 / params.instrumentIds.size();
     if (params.weights.count(instrumentId)) {
         targetWeight = params.weights.at(instrumentId);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Рассчитываем текущую стоимость портфеля
+    // РЕЖИМ РЕИНВЕСТИРОВАНИЯ: простое распределение свободного кэша
+    // Используется когда кэш > 5% портфеля (дивиденды, остаток после дня 0)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (context.isReinvestment) {
+        // Распределяем ВЕСЬ доступный кэш пропорционально весам
+        double allocation = context.cashBalance * targetWeight;
+
+        if (allocation < price) {
+            return result;  // Недостаточно для покупки даже 1 акции
+        }
+
+        std::size_t shares = static_cast<std::size_t>(std::floor(allocation / price));
+
+        if (shares == 0) {
+            return result;
+        }
+
+        double totalAmount = shares * price;
+
+        // Создаем налоговый лот если нужно
+        if (taxCalculator_) {
+            TaxLot lot;
+            lot.purchaseDate = context.currentDate;
+            lot.quantity = static_cast<double>(shares);
+            lot.costBasis = price;
+            lot.instrumentId = instrumentId;
+
+            context.taxLots[instrumentId].push_back(lot);
+        }
+
+        result.sharesTraded = static_cast<double>(shares);
+        result.price = price;
+        result.totalAmount = totalAmount;
+        result.reason = "cash reinvestment";
+
+        return result;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // РЕЖИМ РЕБАЛАНСИРОВКИ: сложная логика с расчетом дефицита
+    // Используется в день 0 и дни ребалансировки
     // ════════════════════════════════════════════════════════════════════════
 
     double totalPortfolioValue = context.cashBalance;
@@ -254,7 +296,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     double deficit = targetValue - currentValue;
 
     if (deficit <= 0) {
-        return result;  // Нет дефицита, не покупаем
+        return result;  // Нет дефицита
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -291,48 +333,45 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     if (totalDeficit > 0) {
         allocation = context.cashBalance * (deficit / totalDeficit);
     } else {
-        // Если нет дефицита ни по одному инструменту, распределяем равномерно
         allocation = context.cashBalance * targetWeight;
     }
 
     if (allocation <= 0) {
-        return result;  // Нулевая или отрицательная аллокация
+        return result;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
     // Рассчитываем количество акций
-    // ════════════════════════════════════════════════════════════════════════
-
     double sharesDouble = allocation / price;
     std::size_t shares = static_cast<std::size_t>(std::floor(sharesDouble));
 
     if (shares == 0) {
-        return result;  // Недостаточно средств для покупки хотя бы одной акции
+        return result;
     }
 
     double totalAmount = shares * price;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Выполняем покупку
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (context.holdings.count(instrumentId)) {
-        context.holdings[instrumentId] += shares;
-    } else {
-        context.holdings[instrumentId] = shares;
+    if (totalAmount > context.cashBalance) {
+        shares = static_cast<std::size_t>(std::floor(context.cashBalance / price));
+        totalAmount = shares * price;
     }
 
-    // Сохраняем налоговый лот, если нужно
+    if (shares == 0) {
+        return result;
+    }
+
+    // ✅ НЕ обновляем holdings здесь - это делает deployCapital()
+
+    // Создаем налоговый лот если нужно
     if (taxCalculator_) {
         TaxLot lot;
-        lot.instrumentId = instrumentId;
         lot.purchaseDate = context.currentDate;
         lot.quantity = static_cast<double>(shares);
         lot.costBasis = price;
+        lot.instrumentId = instrumentId;
+
         context.taxLots[instrumentId].push_back(lot);
     }
 
-    // Формируем результат
     result.sharesTraded = static_cast<double>(shares);
     result.price = price;
     result.totalAmount = totalAmount;

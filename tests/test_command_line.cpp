@@ -91,11 +91,9 @@ TEST_F(CommandExecutorTest, ExecuteStrategyExecute) {
     ParsedCommand cmd;
     cmd.command = "strategy";
     cmd.subcommand = "execute";
-    // ✅ Не предоставляем обязательные параметры
 
     auto result = executor->execute(cmd);
 
-    // ✅ Ожидаем ошибку из-за отсутствия обязательных параметров
     EXPECT_FALSE(result);
     EXPECT_FALSE(result.error().empty());
 }
@@ -105,14 +103,12 @@ TEST_F(CommandExecutorTest, ExecuteStrategyExecuteMissingStrategy) {
     cmd.command = "strategy";
     cmd.subcommand = "execute";
 
-    // ✅ Добавляем portfolio, но не strategy
     cmd.options.insert({"portfolio", po::variable_value(std::string("TestPortfolio"), false)});
     cmd.options.insert({"from", po::variable_value(std::string("2024-01-01"), false)});
     cmd.options.insert({"to", po::variable_value(std::string("2024-12-31"), false)});
 
     auto result = executor->execute(cmd);
 
-    // ✅ Ожидаем ошибку из-за отсутствия strategy
     EXPECT_FALSE(result);
     EXPECT_NE(result.error().find("strategy"), std::string::npos);
 }
@@ -129,7 +125,6 @@ TEST_F(CommandExecutorTest, ExecuteSourceListEmpty) {
 
     auto result = executor->execute(cmd);
 
-    // ✅ ИСПРАВЛЕНО: Аналогично для source list
     if (!result) {
         EXPECT_TRUE(
             result.error().find("Failed to load database plugin") != std::string::npos ||

@@ -111,9 +111,6 @@ function(portfolio_add_test)
         ${PORTFOLIO_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
-
-    # ✅ ИСПРАВЛЕНО: Правильный порядок линковки GTest библиотек
-    # gtest должна идти ПЕРЕД gtest_main
     target_link_libraries(${target_name} PRIVATE
         portfolio_core
         portfolio_cli

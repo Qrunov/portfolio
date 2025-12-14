@@ -134,7 +134,6 @@ void CommandExecutor::printBacktestResult(
               << result.sharpeRatio << std::endl;
     std::cout << std::endl;
 
-    // ✅ ИСПРАВЛЕНО: totalDividends вместо totalDividendsReceived
     if (result.totalDividends > 0) {
         std::cout << "Dividend Income:" << std::endl;
         std::cout << "  Total Dividends:     " << std::setprecision(2)
@@ -161,13 +160,11 @@ void CommandExecutor::printBacktestResult(
         const auto& tax = result.taxSummary;
         std::cout << "  Tax Details:" << std::endl;
 
-        // ✅ ИСПРАВЛЕНО: taxableGain вместо totalTaxableGain
         std::cout << "    Taxable Gain:      ₽" << std::setprecision(2)
                   << tax.taxableGain << std::endl;
         std::cout << "    Tax Paid:          ₽" << std::setprecision(2)
                   << tax.totalTax << std::endl;
 
-        // ✅ ИСПРАВЛЕНО: используем totalDividends для дивидендного налога
         if (result.totalDividends > 0) {
             // Дивидендный налог = дивиденды * ставка (примерно)
             double estimatedDivTax = result.totalDividends * 0.13; // оценка
@@ -175,7 +172,6 @@ void CommandExecutor::printBacktestResult(
                       << estimatedDivTax << std::endl;
         }
 
-        // ✅ УДАЛЕНО: поле longTermExemptionApplied отсутствует в TaxSummary
         // Можно вывести информацию из других полей если нужно
 
         if (tax.carryforwardLoss > 0) {
@@ -403,8 +399,8 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  --date-format FORMAT    Date format (default: %Y-%m-%d)" << std::endl;
         std::cout << "  --skip-header BOOL      Skip CSV header (default: true)" << std::endl;
         std::cout << "  -m, --map MAPPING       Attribute mapping (col:attr format)" << std::endl;
-        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl;
+        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
+        std::cout << "  --db-path PATH          Database file path (for sqlite_db)" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
@@ -412,9 +408,9 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  portfolio load -f sber.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
         std::cout << "    -m 2:Close -m 3:Volume" << std::endl;
         std::cout << std::endl;
-        std::cout << "  # Load data to SQLite database" << std::endl;
+        std::cout << "  # Load data to sqlite_db database" << std::endl;
         std::cout << "  portfolio load -f data.csv -t GAZP -n \"Gazprom\" -s MOEX \\" << std::endl;
-        std::cout << "    --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << "    --db sqlite_db --db-path=./market.db" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "instrument") {
@@ -430,8 +426,8 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << std::endl;
 
         std::cout << "LIST OPTIONS:" << std::endl;
-        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path (for SQLite)" << std::endl;
+        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
+        std::cout << "  --db-path PATH          Database file path (for sqlite_db)" << std::endl;
         std::cout << "  --type TYPE             Filter by instrument type" << std::endl;
         std::cout << "  -s, --source SOURCE     Filter by data source" << std::endl;
         std::cout << std::endl;
@@ -446,8 +442,8 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  # List all instruments from in-memory database" << std::endl;
         std::cout << "  portfolio instrument list" << std::endl;
         std::cout << std::endl;
-        std::cout << "  # List instruments from SQLite database" << std::endl;
-        std::cout << "  portfolio instrument list --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << "  # List instruments from sqlite_db database" << std::endl;
+        std::cout << "  portfolio instrument list --db sqlite_db --db-path=./market.db" << std::endl;
         std::cout << std::endl;
         std::cout << "  # List only stocks" << std::endl;
         std::cout << "  portfolio instrument list --type stock" << std::endl;
@@ -456,7 +452,7 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  portfolio instrument list --source MOEX" << std::endl;
         std::cout << std::endl;
         std::cout << "  # Show instrument details" << std::endl;
-        std::cout << "  portfolio instrument show -t SBER --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << "  portfolio instrument show -t SBER --db sqlite_db --db-path=./market.db" << std::endl;
         std::cout << std::endl;
         std::cout << "  # Delete instrument" << std::endl;
         std::cout << "  portfolio instrument delete -t SBER" << std::endl;
@@ -513,7 +509,7 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  -p, --portfolio NAME    Portfolio name (required)" << std::endl;
         std::cout << "  --from DATE             Start date YYYY-MM-DD (required)" << std::endl;
         std::cout << "  --to DATE               End date YYYY-MM-DD (required)" << std::endl;
-        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
         std::cout << "  --db-path PATH          Database file path" << std::endl;
         std::cout << "  -P, --param KEY:VALUE   Strategy parameter" << std::endl;
         std::cout << std::endl;
@@ -525,10 +521,10 @@ void CommandExecutor::printHelp(std::string_view topic)
 
         std::cout << "EXAMPLES:" << std::endl;
         std::cout << "  portfolio strategy list" << std::endl;
-        std::cout << "  portfolio strategy info -s BuyHold" << std::endl;
-        std::cout << "  portfolio strategy execute -s BuyHold -p MyPort \\" << std::endl;
+        std::cout << "  portfolio strategy info -s buyhold_strategy" << std::endl;
+        std::cout << "  portfolio strategy execute -s buyhold_strategy -p MyPort \\" << std::endl;
         std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    --db SQLite --db-path=./market.db \\" << std::endl;
+        std::cout << "    --db sqlite_db --db-path=./market.db \\" << std::endl;
         std::cout << "    -P calendar:RTSI -P inflation:CPI" << std::endl;
         std::cout << std::endl;
         std::cout << "Note: Command-line -P overrides saved portfolio parameters." << std::endl;
@@ -545,13 +541,13 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << std::endl;
 
         std::cout << "OPTIONS:" << std::endl;
-        std::cout << "  --db TYPE               Database type (InMemory, SQLite)" << std::endl;
+        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
         std::cout << "  --db-path PATH          Database file path" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXAMPLES:" << std::endl;
         std::cout << "  portfolio source list" << std::endl;
-        std::cout << "  portfolio source list --db SQLite --db-path=./market.db" << std::endl;
+        std::cout << "  portfolio source list --db sqlite_db --db-path=./market.db" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "plugin") {
@@ -637,7 +633,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentList(
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "InMemory";
+    std::string dbType = "inmemory_db";
     std::string dbPath;
 
     if (cmd.options.count("db")) {
@@ -731,7 +727,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "InMemory";
+    std::string dbType = "inmemory_db";
     std::string dbPath;
 
     if (cmd.options.count("db")) {
@@ -865,7 +861,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "InMemory";
+    std::string dbType = "inmemory_db";
     std::string dbPath;
 
     if (cmd.options.count("db")) {
@@ -1118,7 +1114,6 @@ std::expected<void, std::string> CommandExecutor::executePortfolioShow(
                   << std::setprecision(1) << (weight * 100) << "%)" << std::endl;
     }
 
-    // ✅ ДОБАВЛЕНО: показываем сохранённые параметры
     if (!info.parameters.empty()) {
         std::cout << std::endl;
         std::cout << "Strategy Parameters (" << info.parameters.size() << "):" << std::endl;
@@ -1442,14 +1437,12 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     params.weights = portfolioInfo.weights;
     params.initialCapital = portfolioInfo.initialCapital;
 
-    // ✅ Шаг 1: Получаем параметры по умолчанию от стратегии
     std::cout << "Loading default parameters from strategy..." << std::endl;
     auto defaultParams = strategy->getDefaultParameters();
     for (const auto& [key, value] : defaultParams) {
         params.setParameter(key, value);
     }
 
-    // ✅ Шаг 2: Применяем сохранённые параметры из портфеля (переопределяют умолчания)
     if (!portfolioInfo.parameters.empty()) {
         std::cout << "Loading saved parameters from portfolio..." << std::endl;
         for (const auto& [key, value] : portfolioInfo.parameters) {
@@ -1458,7 +1451,6 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
         }
     }
 
-    // ✅ Шаг 3: Парсим параметры из командной строки (переопределяют всё)
     if (cmd.options.count("param")) {
         auto paramStrings = cmd.options.at("param").as<std::vector<std::string>>();
 
@@ -1502,8 +1494,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     // Инициализация базы данных
     // ════════════════════════════════════════════════════════════════════════
 
-    // ✅ ИСПРАВЛЕНО: передаём dbType и dbPath из опций
-    std::string dbType = "InMemory";
+    std::string dbType = "inmemory_db";
     std::string dbPath;
 
     if (cmd.options.count("db")) {
@@ -2132,7 +2123,7 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
         std::cout << "    portfolio load ... --db " << plugin.name << std::endl;
         std::cout << "    portfolio instrument list --db " << plugin.name << std::endl;
         std::cout << std::endl;
-        std::cout << "  Example with SQLite database:" << std::endl;
+        std::cout << "  Example with sqlite_db database:" << std::endl;
         std::cout << "    portfolio load -f data.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
         std::cout << "      --db " << plugin.name << " --db-path=./market.db" << std::endl;
 
@@ -2145,7 +2136,7 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
         std::cout << "  With database specification:" << std::endl;
         std::cout << "    portfolio strategy execute -s " << plugin.name
                   << " -p MyPortfolio \\" << std::endl;
-        std::cout << "      --db SQLite --db-path=./market.db \\" << std::endl;
+        std::cout << "      --db sqlite_db --db-path=./market.db \\" << std::endl;
         std::cout << "      --from 2020-01-01 --to 2024-12-31" << std::endl;
 
     } else {

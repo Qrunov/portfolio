@@ -1,3 +1,4 @@
+// src/BasePortfolioStrategy.cpp
 #include "BasePortfolioStrategy.hpp"
 #include <iostream>
 #include <iomanip>
@@ -19,6 +20,7 @@ void BasePortfolioStrategy::setDatabase(std::shared_ptr<IPortfolioDatabase> db)
 void BasePortfolioStrategy::setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc)
 {
     taxCalculator_ = std::move(taxCalc);
+    totalTaxesPaidDuringBacktest_ = 0.0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -33,7 +35,7 @@ BasePortfolioStrategy::backtest(
     double initialCapital)
 {
     // ════════════════════════════════════════════════════════════════════════
-    // 1. Валидация входных параметров
+    // 1. Валидация
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = validateInputParameters(params, startDate, endDate, initialCapital);
@@ -41,14 +43,10 @@ BasePortfolioStrategy::backtest(
         return std::unexpected(result.error());
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // 2. Вывод заголовка
-    // ════════════════════════════════════════════════════════════════════════
-
     printBacktestHeader(params, startDate, endDate, initialCapital);
 
     // ════════════════════════════════════════════════════════════════════════
-    // 3. Инициализация торгового календаря
+    // 2. Инициализация календаря
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = initializeTradingCalendar(params, startDate, endDate);
@@ -62,17 +60,16 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 4. Инициализация корректора инфляции
+    // 3. Инициализация инфляции
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = initializeInflationAdjuster(params, startDate, endDate);
         !result) {
-        // Не критичная ошибка - просто логируем
         std::cout << "Inflation adjustment disabled: " << result.error() << std::endl;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 5. Загрузка данных
+    // 4. Загрузка данных
     // ════════════════════════════════════════════════════════════════════════
 
     TradingContext context;
@@ -91,7 +88,7 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 6. Инициализация стратегии (хук для наследников)
+    // 5. Инициализация стратегии
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = initializeStrategy(context, params); !result) {
@@ -99,35 +96,67 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 7. Главный цикл торговли
+    // 6. Главный цикл торговли
     // ════════════════════════════════════════════════════════════════════════
 
     std::vector<double> dailyValues;
     double totalDividendsReceived = 0.0;
     std::size_t dividendPaymentsCount = 0;
+    totalTaxesPaidDuringBacktest_ = 0.0;
 
+    std::cout << "REBALANCE PERIOD: "
+              << params.getParameter("rebalance_period", "0") << std::endl;
 
-    std::cout << "REBALANCE PERIOD:" << params.getParameter("rebalance_period", "0") << std::endl;
     for (std::size_t i = 0; i < sortedTradingDays.size(); ++i) {
-        context.currentDate = sortedTradingDays[i];
-        context.dayIndex = i;
-        //TODO: если есть учет налогов, то будем считать что последний торговый день года - это день учета налогов
-        //TODO считать налоги, вычитать из кэша, если кэша недостаточно, то проводить ребалансировку с продажей части акций, необходимой для уплаты налогов, согласно торговой стратегии.
-        context.isRebalanceDay = isRebalanceDay(i, std::stoi(params.getParameter("rebalance_period", "0")));
-        context.isLastDay = (i == sortedTradingDays.size() - 1);
-        //TODO: если последний день, то также считать налоги
+        TradingDayInfo dayInfo;
+        // ✅ КРИТИЧЕСКИ ВАЖНО: Нормализуем дату до 00:00:00
+        dayInfo.currentDate = normalizeToDate(sortedTradingDays[i]);
+        dayInfo.year = getYear(dayInfo.currentDate);
 
-        //TODO: дивиденды следует искать в диапазоне(предыдущая торговая дата, текущая торговая дата]
+        // Определяем предыдущую торговую дату
+        if (i > 0) {
+            dayInfo.previousTradingDate = normalizeToDate(sortedTradingDays[i - 1]);
+        } else {
+            dayInfo.previousTradingDate = dayInfo.currentDate;
+        }
+
+        // Устанавливаем флаги
+        context.currentDate = dayInfo.currentDate;
+        context.dayIndex = i;
+        context.isRebalanceDay = isRebalanceDay(
+            i, std::stoi(params.getParameter("rebalance_period", "0")));
+        context.isLastDay = (i == sortedTradingDays.size() - 1);
+
+        dayInfo.isLastDayOfBacktest = context.isLastDay;
+
+        // ✅ TODO #18: Определяем последний торговый день года
+        if (i + 1 < sortedTradingDays.size()) {
+            TimePoint nextTradingDate = normalizeToDate(sortedTradingDays[i + 1]);
+            dayInfo.isLastDayOfYear = isLastTradingDayOfYear(
+                dayInfo.currentDate, nextTradingDate);
+        } else {
+            dayInfo.isLastDayOfYear = true;
+        }
+
+        // Обработка торгового дня
         if (auto result = processTradingDay(
-                context, params, dailyValues,
+                context, params, dayInfo, dailyValues,
                 totalDividendsReceived, dividendPaymentsCount);
             !result) {
             return std::unexpected(result.error());
         }
+
+        // ✅ TODO #18, #19, #20: Обработка налогов на конец года
+        if (taxCalculator_ && (dayInfo.isLastDayOfYear || dayInfo.isLastDayOfBacktest)) {
+            if (auto result = processYearEndTaxes(context, params, dayInfo);
+                !result) {
+                std::cout << "⚠️  Tax processing warning: " << result.error() << std::endl;
+            }
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 8. Расчет финальных результатов
+    // 7. Расчет результатов
     // ════════════════════════════════════════════════════════════════════════
 
     BacktestResult result = calculateFinalResults(
@@ -135,7 +164,7 @@ BasePortfolioStrategy::backtest(
         dividendPaymentsCount, startDate, endDate, params);
 
     // ════════════════════════════════════════════════════════════════════════
-    // 9. Вывод итоговой статистики
+    // 8. Вывод статистики
     // ════════════════════════════════════════════════════════════════════════
 
     printFinalSummary(result);
@@ -144,12 +173,175 @@ BasePortfolioStrategy::backtest(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// БАЗОВАЯ РЕАЛИЗАЦИЯ: Получение дивидендов
+// ОБРАБОТКА ТОРГОВОГО ДНЯ
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::expected<void, std::string> BasePortfolioStrategy::processTradingDay(
+    TradingContext& context,
+    const PortfolioParams& params,
+    const TradingDayInfo& dayInfo,
+    std::vector<double>& dailyValues,
+    double& totalDividendsReceived,
+    std::size_t& dividendPaymentsCount)
+{
+    if (auto result = collectCash(
+            context, params, dayInfo,
+            totalDividendsReceived, dividendPaymentsCount);
+        !result) {
+        return std::unexpected(result.error());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Покупаем если:
+    // 1. Первый день (начальное размещение)
+    // 2. День ребалансировки (перераспределение весов)
+    // 3. Есть значимая сумма кэша (>5% портфеля) - реинвестирование дивидендов
+    // ════════════════════════════════════════════════════════════════════════
+
+    bool shouldBuy = false;
+    bool isReinvestment = false;  // Флаг режима реинвестирования
+
+    if (!context.isLastDay) {
+        if (context.dayIndex == 0) {
+            // Первый день - начальное размещение
+            shouldBuy = true;
+            isReinvestment = false;
+        } else if (context.isRebalanceDay) {
+            // День ребалансировки - используем логику с дефицитом
+            shouldBuy = true;
+            isReinvestment = false;
+        } else {
+            // Проверяем долю кэша в портфеле
+            double totalValue = calculatePortfolioValue(context);
+            if (totalValue > 0) {
+                double cashRatio = context.cashBalance / totalValue;
+                // Если кэш > 5% портфеля - реинвестируем
+                if (cashRatio > 0.05) {
+                    shouldBuy = true;
+                    isReinvestment = true;  // ✅ Режим реинвестирования!
+                }
+            }
+        }
+    }
+
+    if (shouldBuy) {
+        // Сохраняем режим в контексте для buy()
+        context.isReinvestment = isReinvestment;
+
+        if (auto result = deployCapital(context, params); !result) {
+            return std::unexpected(result.error());
+        }
+    }
+
+    double portfolioValue = calculatePortfolioValue(context);
+    dailyValues.push_back(portfolioValue);
+
+    return {};
+}
+
+std::expected<void, std::string> BasePortfolioStrategy::collectCash(
+    TradingContext& context,
+    const PortfolioParams& params,
+    const TradingDayInfo& dayInfo,
+    double& totalDividendsReceived,
+    std::size_t& dividendPaymentsCount)
+{
+    // Сбор дивидендов
+    for (const auto& [instrumentId, shares] : context.holdings) {
+        auto divResult = getDividend(
+            instrumentId, context, dayInfo.previousTradingDate);
+
+        if (!divResult) {
+            std::cout << "  ⚠ Failed to get dividend for " << instrumentId
+                      << ": " << divResult.error() << std::endl;
+            continue;
+        }
+
+        double dividendAmount = *divResult;
+
+        if (dividendAmount > 0.0) {
+            context.cashBalance += dividendAmount;
+            totalDividendsReceived += dividendAmount;
+            ++dividendPaymentsCount;
+        }
+    }
+
+    // Продажи
+    if (context.isRebalanceDay || context.isLastDay) {
+        for (const auto& instrumentId : params.instrumentIds) {
+            auto sellResult = sell(instrumentId, context, params);
+
+            if (sellResult && sellResult->sharesTraded > 0) {
+                context.holdings[instrumentId] -= sellResult->sharesTraded;
+
+                if (context.holdings[instrumentId] < 0.0001) {
+                    context.holdings.erase(instrumentId);
+                }
+
+                context.cashBalance += sellResult->totalAmount;
+
+                auto time = std::chrono::system_clock::to_time_t(context.currentDate);
+                std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
+                          << "  📤 SELL: " << instrumentId
+                          << " " << std::fixed << std::setprecision(0)
+                          << sellResult->sharesTraded << " shares @ ₽"
+                          << std::setprecision(2) << sellResult->price
+                          << " = ₽" << sellResult->totalAmount;
+
+                if (!sellResult->reason.empty()) {
+                    std::cout << " (" << sellResult->reason << ")";
+                }
+
+                std::cout << std::endl;
+            }
+        }
+    }
+
+    return {};
+}
+
+std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
+    TradingContext& context,
+    const PortfolioParams& params)
+{
+    for (const auto& instrumentId : params.instrumentIds) {
+        auto buyResult = buy(instrumentId, context, params);
+
+        if (buyResult && buyResult->sharesTraded > 0) {
+            // ✅ КРИТИЧЕСКИ ВАЖНО: Добавляем купленные акции в holdings
+            context.holdings[instrumentId] += buyResult->sharesTraded;
+
+            context.cashBalance -= buyResult->totalAmount;
+
+            auto time = std::chrono::system_clock::to_time_t(context.currentDate);
+
+            std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
+                      << "  📥 BUY:  " << instrumentId
+                      << " " << std::fixed << std::setprecision(0)
+                      << buyResult->sharesTraded << " shares @ ₽"
+                      << std::setprecision(2) << buyResult->price
+                      << " = ₽" << buyResult->totalAmount
+                      << " (cash: ₽" << context.cashBalance << ")";
+
+            if (!buyResult->reason.empty()) {
+                std::cout << " (" << buyResult->reason << ")";
+            }
+
+            std::cout << std::endl;
+        }
+    }
+
+    return {};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ✅ TODO #21, #22, #23: УЛУЧШЕННАЯ ОБРАБОТКА ДИВИДЕНДОВ
 // ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<double, std::string> BasePortfolioStrategy::getDividend(
     const std::string& instrumentId,
-    TradingContext& context)
+    TradingContext& context,
+    const TimePoint& previousTradingDate)
 {
     double totalDividend = 0.0;
 
@@ -165,20 +357,36 @@ std::expected<double, std::string> BasePortfolioStrategy::getDividend(
 
     const auto& dividends = context.dividendData[instrumentId];
 
+    // ✅ TODO #21, #22: Ищем дивиденды в диапазоне (previousDate, currentDate]
     for (const auto& dividend : dividends) {
-        //TODO: надо учитывать если дата выплаты попадает в диапозон между текущим и предыдущим торговым днем, так как выплата реально может приходится на неторговый день
-        if (dividend.date == context.currentDate) {
-            double dividendAmount = dividend.amount * shares;
-            //TODO: если есть учет налогов, то здесь дивиденд должен быть очищен от налогов
-            //вероятно следует доработать TaxCalculator::recordDividend(double amount), чтобы он возвращал скорректированный дивиденд
-            totalDividend += dividendAmount;
+        if (dividend.date > previousTradingDate &&
+            dividend.date <= context.currentDate) {
 
-            auto time = std::chrono::system_clock::to_time_t(context.currentDate);
+            double grossDividend = dividend.amount * shares;
+
+            // ✅ TODO #23: Вычитаем налог с дивиденда
+            double netDividend = grossDividend;
+            if (taxCalculator_) {
+                netDividend = taxCalculator_->recordDividend(grossDividend);
+            }
+
+            totalDividend += netDividend;
+
+            auto time = std::chrono::system_clock::to_time_t(dividend.date);
             std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
                       << "  💰 Dividend: " << instrumentId
                       << " " << std::fixed << std::setprecision(2)
-                      << dividend.amount << " x " << shares << " shares = "
-                      << dividendAmount << std::endl;
+                      << dividend.amount << " x " << std::setprecision(0)
+                      << shares << " shares = ₽"
+                      << std::setprecision(2) << grossDividend;
+
+            if (taxCalculator_) {
+                double tax = grossDividend - netDividend;
+                std::cout << " (after tax: ₽" << netDividend
+                          << ", tax: ₽" << tax << ")";
+            }
+
+            std::cout << std::endl;
         }
     }
 
@@ -186,7 +394,235 @@ std::expected<double, std::string> BasePortfolioStrategy::getDividend(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ОПРЕДЕЛЕНИЕ ДНЯ РЕБАЛАНСИРОВКИ
+// ✅ TODO #18, #19, #20: ОБРАБОТКА НАЛОГОВ НА КОНЕЦ ГОДА
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::expected<void, std::string> BasePortfolioStrategy::processYearEndTaxes(
+    TradingContext& context,
+    const PortfolioParams& params,
+    const TradingDayInfo& dayInfo)
+{
+    if (!taxCalculator_) {
+        return {};
+    }
+
+    auto taxSummary = taxCalculator_->calculateYearEndTax();
+
+    if (taxSummary.totalTax <= 0.0) {
+        if (dayInfo.isLastDayOfYear) {
+            std::cout << "\n📊 Year-End Tax Summary (Year " << dayInfo.year << "): "
+                      << "No tax owed" << std::endl;
+
+            if (taxSummary.carryforwardLoss > 0.0) {
+                std::cout << "   Loss carried forward: ₽"
+                          << std::setprecision(2) << taxSummary.carryforwardLoss
+                          << std::endl;
+            }
+        }
+
+        if (dayInfo.isLastDayOfYear && !dayInfo.isLastDayOfBacktest) {
+            taxCalculator_->resetForNewYear(0.0);
+        }
+
+        return {};
+    }
+
+    // ✅ TODO #19: Пытаемся уплатить налог из кэша
+    auto paymentResult = taxCalculator_->payYearEndTax(
+        context.cashBalance, taxSummary);
+
+    if (!paymentResult) {
+        return std::unexpected("Failed to process tax payment: " + paymentResult.error());
+    }
+
+    double taxPaid = *paymentResult;
+
+    auto time = std::chrono::system_clock::to_time_t(context.currentDate);
+    std::cout << "\n📊 Year-End Tax Payment ("
+              << std::put_time(std::localtime(&time), "%Y-%m-%d") << "):" << std::endl;
+    std::cout << "   Tax owed: ₽" << std::setprecision(2) << taxSummary.totalTax << std::endl;
+    std::cout << "   Cash available: ₽" << context.cashBalance << std::endl;
+
+    context.cashBalance -= taxPaid;
+    totalTaxesPaidDuringBacktest_ += taxPaid;
+
+    std::cout << "   Tax paid: ₽" << taxPaid << std::endl;
+    std::cout << "   Remaining cash: ₽" << context.cashBalance << std::endl;
+
+    // ✅ TODO #19: Если кэша недостаточно - проводим ребалансировку
+    double shortfall = taxSummary.totalTax - taxPaid;
+    if (shortfall > 0.01) {
+        std::cout << "   💡 Need to rebalance for tax payment: ₽"
+                  << shortfall << std::endl;
+
+        auto rebalanceResult = rebalanceForTaxPayment(context, params, shortfall);
+        if (!rebalanceResult) {
+            std::cout << "   ⚠️  Rebalancing warning: " << rebalanceResult.error() << std::endl;
+        } else {
+            double cashRaised = *rebalanceResult;
+
+            // ✅ КРИТИЧНО: Вычитаем собранные деньги из кэша (они идут на налоги)
+            context.cashBalance -= cashRaised;
+            totalTaxesPaidDuringBacktest_ += cashRaised;
+
+            std::cout << "   💰 Tax paid from rebalancing: ₽" << cashRaised << std::endl;
+            std::cout << "   💵 Remaining cash: ₽" << context.cashBalance << std::endl;
+
+            // Обновляем shortfall
+            shortfall -= cashRaised;
+        }
+    }
+
+    std::cout << std::endl;
+
+    if (dayInfo.isLastDayOfYear && !dayInfo.isLastDayOfBacktest) {
+        taxCalculator_->resetForNewYear(shortfall);
+    }
+
+    return {};
+}
+
+std::expected<double, std::string> BasePortfolioStrategy::rebalanceForTaxPayment(
+    TradingContext& context,
+    const PortfolioParams& params,
+    double taxOwed)
+{
+    if (taxOwed <= 0.0) {
+        return 0.0;
+    }
+
+    double totalPortfolioValue = calculatePortfolioValue(context);
+
+    if (totalPortfolioValue < taxOwed) {
+        return std::unexpected(
+            "Portfolio value insufficient to pay tax (₽" +
+            std::to_string(totalPortfolioValue) + " < ₽" +
+            std::to_string(taxOwed) + ")");
+    }
+
+    std::cout << "   🔄 Rebalancing to raise ₽" << std::setprecision(2)
+              << taxOwed << " for tax payment" << std::endl;
+
+    double cashRaised = 0.0;
+
+    for (const auto& instrumentId : params.instrumentIds) {
+        if (cashRaised >= taxOwed) {
+            break;
+        }
+
+        if (!context.holdings.count(instrumentId)) {
+            continue;
+        }
+
+        double currentShares = context.holdings[instrumentId];
+        if (currentShares < 0.0001) {
+            continue;
+        }
+
+        double weight = 1.0 / params.instrumentIds.size();
+        if (params.weights.count(instrumentId)) {
+            weight = params.weights.at(instrumentId);
+        }
+
+        double targetSale = taxOwed * weight;
+
+        auto priceResult = getPrice(instrumentId, context.currentDate, context);
+        if (!priceResult) {
+            continue;
+        }
+
+        double price = *priceResult;
+        double sharesToSell = std::floor(targetSale / price);
+
+        sharesToSell = std::min(sharesToSell, std::floor(currentShares));
+
+        if (sharesToSell < 1.0) {
+            continue;
+        }
+
+        context.holdings[instrumentId] -= sharesToSell;
+        double proceeds = sharesToSell * price;
+        context.cashBalance += proceeds;
+        cashRaised += proceeds;
+
+        std::cout << "      Sold " << std::setprecision(0) << sharesToSell
+                  << " shares of " << instrumentId
+                  << " @ ₽" << std::setprecision(2) << price
+                  << " = ₽" << proceeds << std::endl;
+
+        if (context.holdings[instrumentId] < 0.0001) {
+            context.holdings.erase(instrumentId);
+        }
+    }
+
+    if (cashRaised < taxOwed) {
+        std::cout << "      ⚠️  Only raised ₽" << cashRaised
+                  << " of ₽" << taxOwed << " needed" << std::endl;
+    }
+
+    return cashRaised;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ✅ TODO #24, #25, #26, #27, #28: УЛУЧШЕННОЕ ОПРЕДЕЛЕНИЕ ДЕЛИСТИНГА
+// ═══════════════════════════════════════════════════════════════════════════════
+
+InstrumentPriceInfo BasePortfolioStrategy::getInstrumentPriceInfo(
+    const std::string& instrumentId,
+    const TradingContext& context) const
+{
+    InstrumentPriceInfo info;
+
+    if (!context.priceData.count(instrumentId)) {
+        return info;
+    }
+
+    const auto& prices = context.priceData.at(instrumentId);
+    if (prices.empty()) {
+        return info;
+    }
+
+    info.hasData = true;
+
+    // ✅ TODO #27: map отсортирован - используем begin()/rbegin()
+    info.firstAvailableDate = prices.begin()->first;
+    info.lastAvailableDate = prices.rbegin()->first;
+    info.lastKnownPrice = prices.rbegin()->second;
+
+    return info;
+}
+
+bool BasePortfolioStrategy::isDelisted(
+    const std::string& instrumentId,
+    const TimePoint& currentDate,
+    const TradingContext& context) const
+{
+    auto priceInfo = getInstrumentPriceInfo(instrumentId, context);
+
+    if (!priceInfo.hasData) {
+        return false;
+    }
+
+    // ✅ TODO #26, #28: Правильное условие делистинга
+    return currentDate > priceInfo.lastAvailableDate;
+}
+
+std::expected<double, std::string> BasePortfolioStrategy::getLastAvailablePrice(
+    const std::string& instrumentId,
+    const TimePoint& currentDate,
+    const TradingContext& context) const
+{
+    auto priceInfo = getInstrumentPriceInfo(instrumentId, context);
+
+    if (!priceInfo.hasData) {
+        return std::unexpected("No price data for instrument: " + instrumentId);
+    }
+
+    return priceInfo.lastKnownPrice;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool BasePortfolioStrategy::isRebalanceDay(
@@ -200,21 +636,30 @@ bool BasePortfolioStrategy::isRebalanceDay(
     return (dayIndex % rebalancePeriod) == 0;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
-// ═══════════════════════════════════════════════════════════════════════════════
-
 TimePoint BasePortfolioStrategy::normalizeToDate(const TimePoint& timestamp) const
 {
-    auto duration = timestamp.time_since_epoch();
-    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+    auto timeT = std::chrono::system_clock::to_time_t(timestamp);
+    std::tm tm = *std::localtime(&timeT);
+    tm.tm_hour = 0;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    return std::chrono::system_clock::from_time_t(std::mktime(&tm));
+}
 
-    constexpr int64_t secondsPerDay = 24 * 60 * 60;
-    auto days = seconds / secondsPerDay;
+double BasePortfolioStrategy::calculatePortfolioValue(const TradingContext& context) const
+{
+    double totalValue = context.cashBalance;
 
-    auto normalizedSeconds = days * secondsPerDay;
+    for (const auto& [instrumentId, shares] : context.holdings) {
+        if (shares > 0.0) {
+            auto priceResult = getPrice(instrumentId, context.currentDate, context);
+            if (priceResult) {
+                totalValue += shares * (*priceResult);
+            }
+        }
+    }
 
-    return TimePoint{std::chrono::seconds{normalizedSeconds}};
+    return totalValue;
 }
 
 std::expected<double, std::string> BasePortfolioStrategy::getPrice(
@@ -223,46 +668,35 @@ std::expected<double, std::string> BasePortfolioStrategy::getPrice(
     const TradingContext& context) const
 {
     if (!context.priceData.count(instrumentId)) {
-        return std::unexpected("No price data for " + instrumentId);
+        return std::unexpected("No price data for: " + instrumentId);
     }
 
     const auto& prices = context.priceData.at(instrumentId);
+    auto it = prices.find(date);
 
-    TimePoint normalizedDate = normalizeToDate(date);
-    auto it = prices.find(normalizedDate);
-
-    if (it == prices.end()) {
-        return std::unexpected(
-            "No price data for " + instrumentId + " on requested date");
+    if (it != prices.end()) {
+        return it->second;
     }
 
-    return it->second;
+    return std::unexpected(
+        "No price for " + instrumentId + " on specified date");
 }
 
-double BasePortfolioStrategy::calculatePortfolioValue(
-    const TradingContext& context) const
+bool BasePortfolioStrategy::isLastTradingDayOfYear(
+    const TimePoint& currentDate,
+    const TimePoint& nextTradingDate) const
 {
-    double totalValue = context.cashBalance;
+    int currentYear = getYear(currentDate);
+    int nextYear = getYear(nextTradingDate);
 
-    for (const auto& [instrumentId, shares] : context.holdings) {
-        auto priceResult = getPrice(instrumentId, context.currentDate, context);
+    return nextYear > currentYear;
+}
 
-        if (priceResult) {
-            totalValue += shares * (*priceResult);
-        } else {
-            if (context.priceData.count(instrumentId)) {
-                const auto& prices = context.priceData.at(instrumentId);
-
-                auto it = prices.upper_bound(context.currentDate);
-                if (it != prices.begin()) {
-                    --it;
-                    totalValue += shares * it->second;
-                }
-            }
-        }
-    }
-
-    return totalValue;
+int BasePortfolioStrategy::getYear(const TimePoint& date) const
+{
+    auto timeT = std::chrono::system_clock::to_time_t(date);
+    std::tm tm = *std::localtime(&timeT);
+    return tm.tm_year + 1900;
 }
 
 std::expected<void, std::string> BasePortfolioStrategy::loadPriceData(
@@ -272,20 +706,19 @@ std::expected<void, std::string> BasePortfolioStrategy::loadPriceData(
     std::map<std::string, std::map<TimePoint, double>>& priceData)
 {
     for (const auto& instrumentId : instrumentIds) {
-        auto priceResult = database_->getAttributeHistory(
+        auto priceHistory = database_->getAttributeHistory(
             instrumentId, "close", startDate, endDate);
 
-        if (!priceResult) {
+        if (!priceHistory) {
             return std::unexpected(
-                "Failed to load price data for " + instrumentId + ": " +
-                priceResult.error());
+                "Failed to load price data for " + instrumentId +
+                ": " + priceHistory.error());
         }
 
-        const auto& history = *priceResult;
+        const auto& history = *priceHistory;
 
-        if (history.empty()) {
-            return std::unexpected("No price data for " + instrumentId);
-        }
+        std::cout << "  Prices for " << instrumentId << ": "
+                  << history.size() << " data points" << std::endl;
 
         for (const auto& [timestamp, value] : history) {
             if (std::holds_alternative<double>(value)) {
@@ -351,7 +784,7 @@ std::map<std::string, std::string> BasePortfolioStrategy::getDefaultParameters()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ПРИВАТНЫЕ МЕТОДЫ ШАБЛОННОГО МЕТОДА
+// ПРИВАТНЫЕ МЕТОДЫ
 // ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<void, std::string> BasePortfolioStrategy::validateInputParameters(
@@ -461,118 +894,6 @@ void BasePortfolioStrategy::printBacktestHeader(
     }
 }
 
-std::expected<void, std::string> BasePortfolioStrategy::processTradingDay(
-    TradingContext& context,
-    const PortfolioParams& params,
-    std::vector<double>& dailyValues,
-    double& totalDividendsReceived,
-    std::size_t& dividendPaymentsCount)
-{
-    if (auto result = collectCash(
-            context, params, totalDividendsReceived, dividendPaymentsCount);
-        !result) {
-        return std::unexpected(result.error());
-    }
-
-    if (auto result = deployCapital(context, params); !result) {
-        return std::unexpected(result.error());
-    }
-
-    double portfolioValue = calculatePortfolioValue(context);
-    dailyValues.push_back(portfolioValue);
-
-    return {};
-}
-
-std::expected<void, std::string> BasePortfolioStrategy::collectCash(
-    TradingContext& context,
-    const PortfolioParams& params,
-    double& totalDividendsReceived,
-    std::size_t& dividendPaymentsCount)
-{
-    for (const auto& [instrumentId, shares] : context.holdings) {
-        auto divResult = getDividend(instrumentId, context);
-
-        if (!divResult) {
-            std::cout << "  ⚠ Failed to get dividend for " << instrumentId
-                      << ": " << divResult.error() << std::endl;
-            continue;
-        }
-
-        double dividendAmount = *divResult;
-
-        if (dividendAmount > 0) {
-            context.cashBalance += dividendAmount;
-            totalDividendsReceived += dividendAmount;
-            ++dividendPaymentsCount;
-        }
-    }
-
-    if (context.isRebalanceDay || context.isLastDay) {
-        for (const auto& instrumentId : params.instrumentIds) {
-            auto sellResult = sell(instrumentId, context, params);
-
-            if (sellResult && sellResult->sharesTraded > 0) {
-                context.holdings[instrumentId] -= sellResult->sharesTraded;
-
-                if (context.holdings[instrumentId] < 0.0001) {
-                    context.holdings.erase(instrumentId);
-                }
-
-                context.cashBalance += sellResult->totalAmount;
-
-                auto time = std::chrono::system_clock::to_time_t(context.currentDate);
-                std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
-                          << "  📤 SELL: " << instrumentId
-                          << " " << std::fixed << std::setprecision(0)
-                          << sellResult->sharesTraded << " shares @ "
-                          << std::setprecision(2) << sellResult->price
-                          << " = " << sellResult->totalAmount;
-
-                if (!sellResult->reason.empty()) {
-                    std::cout << " (" << sellResult->reason << ")";
-                }
-
-                std::cout << std::endl;
-            }
-        }
-    }
-
-    return {};
-}
-
-std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
-    TradingContext& context,
-    const PortfolioParams& params)
-{
-    for (const auto& instrumentId : params.instrumentIds) {
-        auto buyResult = buy(instrumentId, context, params);
-
-        if (buyResult && buyResult->sharesTraded > 0) {
-            context.cashBalance -= buyResult->totalAmount;
-
-            auto time = std::chrono::system_clock::to_time_t(context.currentDate);
-
-
-            std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d")
-                      << "  📥 BUY:  " << instrumentId
-                      << " " << std::fixed << std::setprecision(0)
-                      << buyResult->sharesTraded << " shares @ "
-                      << std::setprecision(2) << buyResult->price
-                      << " = " << buyResult->totalAmount
-                      << "context.cashBalance = " <<  context.cashBalance;
-
-            if (!buyResult->reason.empty()) {
-                std::cout << " (" << buyResult->reason << ")";
-            }
-
-            std::cout << std::endl;
-        }
-    }
-
-    return {};
-}
-
 IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
     const std::vector<double>& dailyValues,
     double initialCapital,
@@ -597,145 +918,92 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         result.annualizedReturn = (std::pow(
                                        result.finalValue / initialCapital, 1.0 / yearsElapsed) - 1.0) * 100.0;
     }
-    //TODO: здесь должна быть некоторая сводка по налогам
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Корректировка на инфляцию
-    // ════════════════════════════════════════════════════════════════════════
+    // Дивиденды
+    result.totalDividends = totalDividendsReceived;
+    result.dividendPayments = dividendPaymentsCount;
 
+    if (initialCapital > 0) {
+        result.dividendYield = (totalDividendsReceived / initialCapital) * 100.0;
+    }
+
+    // Волатильность
+    if (dailyValues.size() > 1) {
+        std::vector<double> returns;
+        for (std::size_t i = 1; i < dailyValues.size(); ++i) {
+            if (dailyValues[i - 1] > 0) {
+                double dailyReturn = (dailyValues[i] - dailyValues[i - 1]) /
+                                     dailyValues[i - 1];
+                returns.push_back(dailyReturn);
+            }
+        }
+
+        if (!returns.empty()) {
+            double meanReturn = std::accumulate(returns.begin(), returns.end(), 0.0) /
+                                returns.size();
+            double variance = 0.0;
+            for (double r : returns) {
+                variance += (r - meanReturn) * (r - meanReturn);
+            }
+            variance /= returns.size();
+            result.volatility = std::sqrt(variance * 252) * 100.0;
+        }
+    }
+
+    // Max drawdown
+    double peak = dailyValues[0];
+    for (double value : dailyValues) {
+        if (value > peak) {
+            peak = value;
+        }
+        double drawdown = ((peak - value) / peak) * 100.0;
+        if (drawdown > result.maxDrawdown) {
+            result.maxDrawdown = drawdown;
+        }
+    }
+
+    // Sharpe Ratio
+    if (result.volatility > 0) {
+        double riskFreeRate = 7.0;
+        if (params.hasParameter("risk_free_rate")) {
+            riskFreeRate = std::stod(params.getParameter("risk_free_rate"));
+        }
+        result.sharpeRatio = (result.annualizedReturn - riskFreeRate) / result.volatility;
+    }
+
+    // Налоги
+    if (taxCalculator_) {
+        auto taxSummary = taxCalculator_->finalize();
+        result.totalTaxesPaid = totalTaxesPaidDuringBacktest_;
+        result.taxSummary = taxSummary;
+
+        if (initialCapital > 0) {
+            result.afterTaxFinalValue = result.finalValue;
+            result.afterTaxReturn = ((result.afterTaxFinalValue - initialCapital) /
+                                     initialCapital) * 100.0;
+
+            if (result.totalReturn > 0) {
+                result.taxEfficiency = (result.afterTaxReturn / result.totalReturn) * 100.0;
+            }
+        }
+    }
+
+    // Инфляция
     if (inflationAdjuster_ && inflationAdjuster_->hasData()) {
         result.hasInflationData = true;
 
         result.cumulativeInflation = inflationAdjuster_->getCumulativeInflation(
-            startDate, endDate);
+                                         startDate, endDate) * 100.0;
 
-        result.realTotalReturn = inflationAdjuster_->adjustReturn(
-            result.totalReturn, startDate, endDate);
+        double inflationFactor = 1.0 + (result.cumulativeInflation / 100.0);
+        result.realFinalValue = result.finalValue / inflationFactor;
 
-        //TODO: здесь очевидно считается неправильно: чтобы посчитать скорректированный среднегодовой возврат надо корректировать на среднегодовую инфляцию
-        result.realAnnualizedReturn = inflationAdjuster_->adjustReturn(
-            result.annualizedReturn, startDate, endDate);
+        result.realTotalReturn = ((result.realFinalValue - initialCapital) /
+                                  initialCapital) * 100.0;
 
-        double inflationMultiplier = 1.0 + (result.cumulativeInflation / 100.0);
-        result.realFinalValue = result.finalValue / inflationMultiplier;
-    }
-
-    result.totalDividends = totalDividendsReceived;
-    if (result.finalValue > 0) {
-        result.dividendYield = (totalDividendsReceived / initialCapital) * 100.0;
-    }
-    result.dividendPayments = static_cast<std::int64_t>(dividendPaymentsCount);
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Волатильность
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (dailyValues.size() > 1) {
-        std::vector<double> dailyReturns;
-        dailyReturns.reserve(dailyValues.size() - 1);
-
-        std::size_t startIdx = 0;
-        for (std::size_t i = 0; i < dailyValues.size(); ++i) {
-            if (dailyValues[i] >= initialCapital * 0.01) {
-                startIdx = i;
-                break;
-            }
-        }
-
-        for (std::size_t i = startIdx + 1; i < dailyValues.size(); ++i) {
-            if (dailyValues[i-1] > 0) {
-                double dailyReturn = (dailyValues[i] - dailyValues[i-1]) / dailyValues[i-1];
-                dailyReturns.push_back(dailyReturn);
-            }
-        }
-
-        if (dailyReturns.size() > 1) {
-            double meanReturn = std::accumulate(
-                                    dailyReturns.begin(), dailyReturns.end(), 0.0) /
-                                static_cast<double>(dailyReturns.size());
-
-            double variance = 0.0;
-            for (double r : dailyReturns) {
-                variance += std::pow(r - meanReturn, 2);
-            }
-            variance /= static_cast<double>(dailyReturns.size());
-
-            double dailyVolatility = std::sqrt(variance);
-            result.volatility = dailyVolatility * std::sqrt(252.0) * 100.0;
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Максимальная просадка
-    // ════════════════════════════════════════════════════════════════════════
-
-    std::size_t startIdx = 0;
-    for (std::size_t i = 0; i < dailyValues.size(); ++i) {
-        if (dailyValues[i] >= initialCapital * 0.01) {
-            startIdx = i;
-            break;
-        }
-    }
-
-    if (startIdx < dailyValues.size()) {
-        double peak = dailyValues[startIdx];
-        double maxDrawdownValue = 0.0;
-
-        for (std::size_t i = startIdx; i < dailyValues.size(); ++i) {
-            double value = dailyValues[i];
-            if (value > peak) {
-                peak = value;
-            }
-            if (peak > 0) {
-                double drawdown = (peak - value) / peak;
-                if (drawdown > maxDrawdownValue) {
-                    maxDrawdownValue = drawdown;
-                }
-            }
-        }
-
-        result.maxDrawdown = maxDrawdownValue * 100.0;
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Sharpe Ratio
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (params.hasParameter("risk_free_rate")) {
-        try {
-            double riskFreeRate = std::stod(params.getParameter("risk_free_rate"));
-            riskFreeRate /= 100.0;
-
-            double dailyRiskFreeRate = std::pow(1.0 + riskFreeRate, 1.0 / 252.0) - 1.0;
-
-            std::vector<double> excessReturns;
-            for (std::size_t i = 1; i < dailyValues.size(); ++i) {
-                if (dailyValues[i-1] > 0) {
-                    double dailyReturn = (dailyValues[i] - dailyValues[i-1]) /
-                                         dailyValues[i-1];
-                    excessReturns.push_back(dailyReturn - dailyRiskFreeRate);
-                }
-            }
-
-            if (!excessReturns.empty()) {
-                double meanExcess = std::accumulate(
-                                        excessReturns.begin(), excessReturns.end(), 0.0) /
-                                    static_cast<double>(excessReturns.size());
-
-                double varianceExcess = 0.0;
-                for (double r : excessReturns) {
-                    varianceExcess += std::pow(r - meanExcess, 2);
-                }
-                varianceExcess /= static_cast<double>(excessReturns.size());
-
-                double stdExcess = std::sqrt(varianceExcess);
-
-                if (stdExcess > 0) {
-                    result.sharpeRatio = (meanExcess / stdExcess) * std::sqrt(252.0);
-                }
-            }
-        } catch (...) {
-            std::cout << "Warning: Could not calculate Sharpe Ratio" << std::endl;
+        if (yearsElapsed > 0) {
+            result.realAnnualizedReturn = (std::pow(
+                                               result.realFinalValue / initialCapital, 1.0 / yearsElapsed) - 1.0) * 100.0;
         }
     }
 
@@ -760,7 +1028,7 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
 
     std::cout << "\nPerformance Metrics:" << std::endl;
     std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
-    std::cout << "  Final Value:         " << std::fixed << std::setprecision(2)
+    std::cout << "  Final Value:         ₽" << std::fixed << std::setprecision(2)
               << result.finalValue << std::endl;
     std::cout << "  Total Return:        " << std::setprecision(2)
               << result.totalReturn << "%" << std::endl;
@@ -771,7 +1039,7 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
         std::cout << "\nInflation-Adjusted Metrics:" << std::endl;
         std::cout << "  Cumulative Inflation:" << std::setprecision(2)
                   << result.cumulativeInflation << "%" << std::endl;
-        std::cout << "  Real Final Value:    " << std::fixed << std::setprecision(2)
+        std::cout << "  Real Final Value:    ₽" << std::fixed << std::setprecision(2)
                   << result.realFinalValue << std::endl;
         std::cout << "  Real Total Return:   " << std::setprecision(2)
                   << result.realTotalReturn << "%" << std::endl;
@@ -789,11 +1057,21 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
 
     if (result.totalDividends > 0) {
         std::cout << "\nDividend Metrics:" << std::endl;
-        std::cout << "  Total Dividends:     " << std::fixed << std::setprecision(2)
+        std::cout << "  Total Dividends:     ₽" << std::fixed << std::setprecision(2)
                   << result.totalDividends << std::endl;
         std::cout << "  Dividend Yield:      " << std::setprecision(2)
                   << result.dividendYield << "%" << std::endl;
         std::cout << "  Payments Count:      " << result.dividendPayments << std::endl;
+    }
+
+    if (result.totalTaxesPaid > 0) {
+        std::cout << "\nTax Metrics:" << std::endl;
+        std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
+                  << result.totalTaxesPaid << std::endl;
+        std::cout << "  After-Tax Return:    " << std::setprecision(2)
+                  << result.afterTaxReturn << "%" << std::endl;
+        std::cout << "  Tax Efficiency:      " << std::setprecision(2)
+                  << result.taxEfficiency << "%" << std::endl;
     }
 
     std::cout << std::endl;

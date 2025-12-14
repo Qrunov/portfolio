@@ -1,4 +1,3 @@
-// include/TaxCalculator.hpp
 #pragma once
 
 #include "IPortfolioDatabase.hpp"
@@ -79,7 +78,10 @@ public:
     void setCarryforwardLoss(double loss) noexcept { carryforwardLoss_ = loss; }
     double getCarryforwardLoss() const noexcept { return carryforwardLoss_; }
 
+    // ═══════════════════════════════════════════════════════════════════════
     // Регистрация операций
+    // ═══════════════════════════════════════════════════════════════════════
+
     std::expected<void, std::string> recordSale(
         std::string_view instrumentId,
         double quantity,
@@ -87,10 +89,33 @@ public:
         const TimePoint& saleDate,
         std::vector<TaxLot>& availableLots);
 
-    void recordDividend(double amount);
+    // ✅ НОВОЕ (TODO #23): Возвращает чистый дивиденд после вычета налога
+    double recordDividend(double grossAmount);
 
-    // Финализация года
+    // ═══════════════════════════════════════════════════════════════════════
+    // ✅ НОВОЕ (TODO #18, #19, #20): Расчет и уплата налогов на конец года
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Рассчитать налог за текущий год (промежуточный расчет)
+    TaxSummary calculateYearEndTax();
+
+    // Применить уплату налога (вычесть из портфеля)
+    // Возвращает сумму фактически уплаченного налога
+    std::expected<double, std::string> payYearEndTax(
+        double availableCash,
+        TaxSummary& summary);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Финализация года (для окончательного отчета)
+    // ═══════════════════════════════════════════════════════════════════════
+
     TaxSummary finalize();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ✅ НОВОЕ: Сброс состояния для нового года
+    // ═══════════════════════════════════════════════════════════════════════
+
+    void resetForNewYear(double unpaidTaxCarryforward = 0.0);
 
     TaxCalculator(const TaxCalculator&) = delete;
     TaxCalculator& operator=(const TaxCalculator&) = delete;
@@ -100,6 +125,9 @@ private:
     bool longTermExemptionEnabled_;
     LotSelectionMethod lotSelectionMethod_;
     double carryforwardLoss_;
+
+    // ✅ НОВОЕ: Отслеживание неуплаченных налогов
+    double unpaidTax_;
 
     struct Transaction {
         TimePoint date;

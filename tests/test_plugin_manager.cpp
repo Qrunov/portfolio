@@ -43,7 +43,6 @@ TEST_F(PluginManagerTest, SetPluginPath) {
 }
 
 TEST_F(PluginManagerTest, LoadInMemoryPlugin) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     auto result = manager->load("inmemory_db", "");
     ASSERT_TRUE(result.has_value()) << "Failed to load InMemory plugin: " << result.error();
 
@@ -52,7 +51,6 @@ TEST_F(PluginManagerTest, LoadInMemoryPlugin) {
 }
 
 TEST_F(PluginManagerTest, InMemoryPluginHasCorrectInterface) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     auto result = manager->load("inmemory_db", "");
     ASSERT_TRUE(result.has_value());
 
@@ -75,7 +73,6 @@ TEST_F(PluginManagerTest, LoadSQLitePlugin) {
         std::filesystem::remove(dbPath);
     }
 
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     auto result = manager->load("sqlite_db", dbPath);
     ASSERT_TRUE(result.has_value()) << "Failed to load SQLite plugin: " << result.error();
 
@@ -102,14 +99,12 @@ TEST_F(PluginManagerTest, LoadSQLitePlugin) {
 }
 
 TEST_F(PluginManagerTest, LoadNonExistentPlugin) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     auto result = manager->load("nonexistent_db", "");
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
 }
 
 TEST_F(PluginManagerTest, ListLoadedPlugins) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     manager->load("inmemory_db", "");
 
     auto plugins = manager->listLoadedPlugins();
@@ -118,7 +113,6 @@ TEST_F(PluginManagerTest, ListLoadedPlugins) {
 }
 
 TEST_F(PluginManagerTest, UnloadPlugin) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     manager->load("inmemory_db", "");
 
     auto listBefore = manager->listLoadedPlugins();
@@ -132,7 +126,6 @@ TEST_F(PluginManagerTest, UnloadPlugin) {
 }
 
 TEST_F(PluginManagerTest, UnloadAllPlugins) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     manager->load("inmemory_db", "");
 
     auto listBefore = manager->listLoadedPlugins();
@@ -145,7 +138,6 @@ TEST_F(PluginManagerTest, UnloadAllPlugins) {
 }
 
 TEST_F(PluginManagerTest, GetPluginInfo) {
-    // ✅ ИСПРАВЛЕНО: используем унифицированный метод load()
     manager->load("inmemory_db", "");
 
     auto infoResult = manager->getPluginInfo("inmemory_db");

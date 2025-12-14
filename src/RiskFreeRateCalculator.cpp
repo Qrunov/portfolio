@@ -72,7 +72,6 @@ RiskFreeRateCalculator::fromInstrument(
         priceMap[date] = std::get<double>(value);
     }
 
-    // ✅ ШАГ 1: Первый проход - собираем цены с forward fill
     std::vector<std::pair<std::size_t, double>> prices;  // (index, price)
     prices.reserve(tradingDates.size());
 
@@ -97,7 +96,6 @@ RiskFreeRateCalculator::fromInstrument(
         }
     }
 
-    // ✅ ШАГ 2: Backward fill для начальных пропусков
     std::size_t backwardFillCount = 0;
     double firstKnownPrice = 0.0;
 
@@ -122,7 +120,6 @@ RiskFreeRateCalculator::fromInstrument(
         }
     }
 
-    // ✅ Логирование заполнений
     if (forwardFillCount > 0) {
         std::cout << "  ⚠ Forward filled " << forwardFillCount
                   << " missing dates for " << instrumentId << std::endl;
@@ -183,7 +180,6 @@ double RiskFreeRateCalculator::getAnnualizedReturn() const noexcept
 
     double meanDaily = getMeanDailyReturn();
 
-    // ✅ ПРАВИЛЬНО: Аннуализируем среднюю дневную доходность
     // r_annual = (1 + r_daily)^252 - 1
     return std::pow(1.0 + meanDaily, 252.0) - 1.0;
 }

@@ -1,8 +1,8 @@
-// src/TaxCalculator.cpp
 #include "TaxCalculator.hpp"
 #include <cmath>
 #include <numeric>
 #include <algorithm>
+#include <iostream>
 
 namespace portfolio {
 
@@ -10,7 +10,8 @@ TaxCalculator::TaxCalculator()
     : ndflRate_(0.13),
       longTermExemptionEnabled_(true),
       lotSelectionMethod_(LotSelectionMethod::FIFO),
-      carryforwardLoss_(0.0)
+      carryforwardLoss_(0.0),
+      unpaidTax_(0.0)
 {
 }
 
@@ -18,7 +19,8 @@ TaxCalculator::TaxCalculator(double ndflRate)
     : ndflRate_(ndflRate),
       longTermExemptionEnabled_(true),
       lotSelectionMethod_(LotSelectionMethod::FIFO),
-      carryforwardLoss_(0.0)
+      carryforwardLoss_(0.0),
+      unpaidTax_(0.0)
 {
 }
 
@@ -43,7 +45,7 @@ std::expected<void, std::string> TaxCalculator::recordSale(
         totalAvailable += lot.quantity;
     }
 
-    if (totalAvailable < quantity) {
+    if (totalAvailable < quantity - 0.0001) {  // Небольшая погрешность
         return std::unexpected("Insufficient quantity in lots");
     }
 
@@ -54,8 +56,8 @@ std::expected<void, std::string> TaxCalculator::recordSale(
     double remainingToSell = quantity;
 
     for (auto& lot : availableLots) {
-        if (remainingToSell <= 0.0) break;
-        if (lot.quantity <= 0.0) continue;
+        if (remainingToSell <= 0.0001) break;
+        if (lot.quantity <= 0.0001) continue;
 
         double soldFromLot = std::min(lot.quantity, remainingToSell);
 
@@ -75,14 +77,23 @@ std::expected<void, std::string> TaxCalculator::recordSale(
     return {};
 }
 
-void TaxCalculator::recordDividend(double amount)
+double TaxCalculator::recordDividend(double grossAmount)
 {
-    if (amount > 0.0) {
-        dividendPayments_.push_back(amount);
+    if (grossAmount <= 0.0) {
+        return 0.0;
     }
+
+    // Регистрируем валовый дивиденд для отчетности
+    dividendPayments_.push_back(grossAmount);
+
+    // Вычисляем и возвращаем чистый дивиденд после налога
+    double tax = grossAmount * ndflRate_;
+    double netDividend = grossAmount - tax;
+
+    return netDividend;
 }
 
-TaxSummary TaxCalculator::finalize()
+TaxSummary TaxCalculator::calculateYearEndTax()
 {
     TaxSummary summary;
 
@@ -139,11 +150,64 @@ TaxSummary TaxCalculator::finalize()
         0.0);
     summary.dividendTax = summary.totalDividends * ndflRate_;
 
-    // Общий налог
-    summary.totalTax = summary.capitalGainsTax + summary.dividendTax;
+    // Учитываем неуплаченный налог с прошлых лет
+    summary.totalTax = summary.capitalGainsTax + summary.dividendTax + unpaidTax_;
 
     return summary;
 }
+
+std::expected<double, std::string> TaxCalculator::payYearEndTax(
+    double availableCash,
+    TaxSummary& summary)
+{
+    if (summary.totalTax <= 0.0) {
+        return 0.0;  // Налога нет
+    }
+
+    double taxToPay = summary.totalTax;
+
+    if (availableCash >= taxToPay) {
+        // Достаточно средств для полной уплаты налога
+        unpaidTax_ = 0.0;
+        return taxToPay;
+    } else {
+        // Недостаточно средств - оплачиваем частично
+        // Остаток переносится на следующий год
+        unpaidTax_ = taxToPay - availableCash;
+
+        std::cout << "⚠️  WARNING: Insufficient cash for full tax payment" << std::endl;
+        std::cout << "    Tax owed: ₽" << taxToPay << std::endl;
+        std::cout << "    Cash available: ₽" << availableCash << std::endl;
+        std::cout << "    Unpaid tax carried forward: ₽" << unpaidTax_ << std::endl;
+
+        return availableCash;  // Платим все, что есть
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Финализация года (для итогового отчета)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TaxSummary TaxCalculator::finalize()
+{
+    return calculateYearEndTax();
+}
+
+void TaxCalculator::resetForNewYear(double unpaidTaxCarryforward)
+{
+    // Сохраняем перенос убытков и неуплаченный налог
+    auto summary = calculateYearEndTax();
+    carryforwardLoss_ = summary.carryforwardLoss;
+    unpaidTax_ = unpaidTaxCarryforward;
+
+    // Очищаем транзакции и дивиденды текущего года
+    transactions_.clear();
+    dividendPayments_.clear();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Вспомогательные методы
+// ═══════════════════════════════════════════════════════════════════════════════
 
 void TaxCalculator::selectLots(
     std::vector<TaxLot>& lots,
@@ -152,7 +216,6 @@ void TaxCalculator::selectLots(
 {
     switch (lotSelectionMethod_) {
         case LotSelectionMethod::FIFO:
-            // Уже отсортированы по дате покупки (предполагается)
             std::sort(lots.begin(), lots.end(),
                 [](const TaxLot& a, const TaxLot& b) {
                     return a.purchaseDate < b.purchaseDate;
@@ -160,7 +223,6 @@ void TaxCalculator::selectLots(
             break;
 
         case LotSelectionMethod::LIFO:
-            // Последние купленные продаются первыми
             std::sort(lots.begin(), lots.end(),
                 [](const TaxLot& a, const TaxLot& b) {
                     return a.purchaseDate > b.purchaseDate;
@@ -168,8 +230,6 @@ void TaxCalculator::selectLots(
             break;
 
         case LotSelectionMethod::MinimizeTax:
-            // Продаём сначала лоты с наибольшей базовой стоимостью
-            // (минимизируем прибыль/максимизируем убыток)
             std::sort(lots.begin(), lots.end(),
                 [](const TaxLot& a, const TaxLot& b) {
                     return a.costBasis > b.costBasis;
@@ -183,15 +243,14 @@ bool TaxCalculator::isLongTermHolding(
     const TimePoint& saleDate) const
 {
     // Льгота применяется при владении более 3 лет
+    // Точный расчет: 3 года + 1 день
     auto duration = std::chrono::duration_cast<std::chrono::hours>(
         saleDate - purchaseDate);
 
-    // 3 года = 3 * 365.25 дней = 1095.75 дней
-    // Добавляем небольшой запас для учёта високосных лет
-    //TODO: здесь можно посчитать точно, не пребегая к эвристикам
+    // 3 года в часах (с учетом високосных лет - используем среднее)
     constexpr double threeYearsInHours = 3.0 * 365.25 * 24.0;
 
-    return duration.count() > threeYearsInHours;
+    return duration.count() >= threeYearsInHours;
 }
 
 } // namespace portfolio

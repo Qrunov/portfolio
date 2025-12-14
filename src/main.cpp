@@ -21,42 +21,8 @@ int main(int argc, char** argv)
 
         const auto& cmd = parseResult.value();
 
-        // Загружаем плагины
-/*        std::string pluginPath = "./plugins";
-        const char* envPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
-        if (envPath) {
-            pluginPath = envPath;
-        }
-
-        std::cout << "Plugin search path: " << pluginPath << std::endl << std::endl;
-
-        // Загружаем InMemory database по умолчанию
-        std::cout << "Loading InMemory database plugin\n" << std::endl;*/
-
-        std::shared_ptr<IPortfolioDatabase> database;
-
-        // Пытаемся загрузить inmemory_db плагин
-/*        std::string libPath = pluginPath + "/database/inmemory_db.so";
-        void* handle = dlopen(libPath.c_str(), RTLD_LAZY);
-
-        if (handle) {
-            auto createDb = reinterpret_cast<IPortfolioDatabase* (*)()>(
-                dlsym(handle, "createDatabase"));
-
-            if (createDb) {
-                database = std::shared_ptr<IPortfolioDatabase>(createDb());
-                std::cout << "Successfully loaded plugin: inmemory_db from "
-                          << libPath << " (version: 1.0.0)\n" << std::endl;
-            } else {
-                std::cerr << "Warning: createDatabase symbol not found\n" << std::endl;
-            }
-        } else {
-            std::cerr << "Warning: Could not load inmemory_db plugin: "
-                      << dlerror() << "\n" << std::endl;
-        }*/
-
         // Выполняем команду
-        CommandExecutor executor(database);
+        CommandExecutor executor;
         auto execResult = executor.execute(cmd);
 
         if (!execResult) {
@@ -64,7 +30,6 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        // Успешно
         return 0;
 
     } catch (const std::exception& e) {

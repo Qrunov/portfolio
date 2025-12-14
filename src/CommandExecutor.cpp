@@ -12,8 +12,8 @@
 
 namespace portfolio {
 
-CommandExecutor::CommandExecutor(std::shared_ptr<IPortfolioDatabase> db)
-    : database_(db)
+CommandExecutor::CommandExecutor()
+    : database_(nullptr)
 {
     if (!portfolioManager_) {
         portfolioManager_ = std::make_unique<PortfolioManager>();
@@ -219,30 +219,15 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
     std::string config;
 
     // Простое отображение типа -> имя плагина
-    //TODO: убрать прямое сопоставление, грузить по имени файла без расширения
-    if (dbType == "InMemory") {
-        pluginName = "inmemory_db";
-        config = "";
-    } else if (dbType == "SQLite") {
-        pluginName = "sqlite_db";
-        if (dbPath.empty()) {
-            return std::unexpected(
-                "SQLite database requires --db-path option"
-                );
-        }
-        config = dbPath;
-    } else {
-        // Пытаемся найти плагин с таким именем напрямую
-        pluginName = dbType;
-        config = dbPath;
-    }
+    pluginName = dbType;
+    config = dbPath;
 
-    // Пытаемся загрузить плагин
-    auto dbResult = pluginManager_->loadDatabasePlugin(pluginName, config);
+
+    auto dbResult = pluginManager_->load(pluginName, config);
 
     if (!dbResult) {
         // Если не удалось загрузить, получаем список доступных плагинов
-        auto availablePlugins = pluginManager_->getAvailablePlugins("database");
+        auto availablePlugins = pluginManager_->getAvailablePlugins();
 
         std::string errorMsg = "Failed to load database plugin '" + pluginName +
                                "': " + dbResult.error();
@@ -271,7 +256,7 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
 std::expected<void, std::string> CommandExecutor::executeDatabaseList(
     const ParsedCommand& /*cmd*/)
 {
-    auto availablePlugins = pluginManager_->getAvailablePlugins("database");
+    auto availablePlugins = pluginManager_->getAvailablePlugins();
 
     if (availablePlugins.empty()) {
         std::cout << "No database plugins found." << std::endl;
@@ -293,7 +278,7 @@ std::expected<void, std::string> CommandExecutor::executeDatabaseList(
 std::expected<void, std::string> CommandExecutor::executeStrategyListUpdated(
     const ParsedCommand& /*cmd*/)
 {
-    auto availablePlugins = pluginManager_->getAvailablePlugins("strategy");
+    auto availablePlugins = strategyPluginManager_->getAvailablePlugins();
 
     if (availablePlugins.empty()) {
         std::cout << "No strategy plugins found." << std::endl;
@@ -1338,8 +1323,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategyParams(
     // ════════════════════════════════════════════════════════════════════
     // Показываем параметры конкретной стратегии
     // ════════════════════════════════════════════════════════════════════
-
-    auto strategyResult = strategyPluginManager_ -> loadStrategyPlugin(strategyName,"");
+    auto strategyResult = strategyPluginManager_->load(strategyName, "");
     if (!strategyResult) {
         return std::unexpected(strategyResult.error());
     }
@@ -1423,7 +1407,7 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     // Загрузка плагина стратегии
     // ════════════════════════════════════════════════════════════════════════
 
-    auto strategyResult = strategyPluginManager_ -> loadStrategyPlugin(strategyName,"");
+    auto strategyResult = strategyPluginManager_->load(strategyName, "");
     if (!strategyResult) {
         return std::unexpected(strategyResult.error());
     }
@@ -1928,7 +1912,7 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
     // Получение списка доступных плагинов
     // ════════════════════════════════════════════════════════════════════════
 
-    auto availablePlugins = pluginManager_->getAvailablePlugins(typeFilter);
+    auto availablePlugins = pluginManager_->getAvailablePlugins();
 
     // ════════════════════════════════════════════════════════════════════════
     // Обработка пустого результата

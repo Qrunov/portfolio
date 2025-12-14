@@ -14,21 +14,21 @@ namespace portfolio {
 
 class CommandExecutor {
 public:
-    explicit CommandExecutor(std::shared_ptr<IPortfolioDatabase> db = nullptr);
+    explicit CommandExecutor();
     ~CommandExecutor();  // Теперь определяем явно
 
     std::expected<void, std::string> execute(const ParsedCommand& cmd);
+    // Database initialization
+    std::expected<void, std::string> ensureDatabase(
+        const std::string& dbType = "",
+        const std::string& dbPath = "");
+
 
 private:
     std::shared_ptr<IPortfolioDatabase> database_;
     std::unique_ptr<IPortfolioManager> portfolioManager_;
     std::unique_ptr<PluginManager<IPortfolioDatabase>> pluginManager_;
     std::unique_ptr<PluginManager<IPortfolioStrategy>> strategyPluginManager_;
-
-    // Database initialization
-    std::expected<void, std::string> ensureDatabase(
-        const std::string& dbType = "InMemory",
-        const std::string& dbPath = "");
 
     // Help & Version
     std::expected<void, std::string> executeHelp(const ParsedCommand& cmd);

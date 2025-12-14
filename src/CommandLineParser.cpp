@@ -131,7 +131,7 @@
             ("date-column", po::value<std::size_t>()->default_value(1), "Date column index")
             ("date-format", po::value<std::string>()->default_value("%Y-%m-%d"), "Date format")
             ("skip-header", po::value<bool>()->default_value(true), "Skip CSV header")
-            ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
+            ("db", po::value<std::string>()->required(), "Database type")
             ("db-path", po::value<std::string>(), "Database file path")
             ("help,h", "Show help message");
         return desc;
@@ -144,7 +144,7 @@
             ("source,s", po::value<std::string>(), "Filter by source")
             ("type", po::value<std::string>(), "Filter by type")
             ("confirm", po::bool_switch()->default_value(false), "Confirm deletion")
-            ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
+            ("db", po::value<std::string>()->required(), "Database type")
             ("db-path", po::value<std::string>(), "Database file path")
             ("help,h", "Show help message");
         return desc;
@@ -176,10 +176,9 @@
             ("from", po::value<std::string>(), "Start date (YYYY-MM-DD)")
             ("to", po::value<std::string>(), "End date (YYYY-MM-DD)")
             ("initial-capital", po::value<double>(), "Initial capital")
-            ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
+            ("db", po::value<std::string>()->required(), "Database type")
             ("db-path", po::value<std::string>(), "Database path")
 
-            // ✅ ИЗМЕНЕНО: универсальная опция для параметров стратегии
             ("param,P", po::value<std::vector<std::string>>()->multitoken(),
              "Strategy parameters in format key:value (can be specified multiple times)\n"
              "Available parameters:\n"
@@ -201,7 +200,7 @@
     po::options_description CommandLineParser::createSourceOptions() {
         po::options_description desc("Source options");
         desc.add_options()
-            ("db", po::value<std::string>()->default_value("InMemory"), "Database type")
+            ("db", po::value<std::string>()->required(), "Database type")
             ("db-path", po::value<std::string>(), "Database file path")
             ("help,h", "Show help message");
         return desc;

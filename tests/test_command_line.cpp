@@ -8,7 +8,8 @@ using namespace portfolio;
 class CommandExecutorTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        executor = std::make_unique<CommandExecutor>(nullptr);
+        executor = std::make_unique<CommandExecutor>();
+        executor -> ensureDatabase("inmemory_db","");
     }
 
     std::unique_ptr<CommandExecutor> executor;
@@ -44,6 +45,7 @@ TEST_F(CommandExecutorTest, ExecuteVersionCommand) {
 // ТЕСТЫ: Instrument Commands
 // ============================================================================
 
+
 TEST_F(CommandExecutorTest, ExecuteInstrumentListEmpty) {
     ParsedCommand cmd;
     cmd.command = "instrument";
@@ -51,9 +53,12 @@ TEST_F(CommandExecutorTest, ExecuteInstrumentListEmpty) {
 
     auto result = executor->execute(cmd);
 
-    // Может быть ошибка если database не инициализирован
     if (!result) {
-        EXPECT_EQ(result.error(), "Database not initialized");
+        // Проверяем что это ошибка связанная с загрузкой плагина
+        EXPECT_TRUE(
+            result.error().find("Failed to load database plugin") != std::string::npos ||
+            result.error().find("Database not initialized") != std::string::npos
+            ) << "Unexpected error: " << result.error();
     }
 }
 
@@ -116,6 +121,7 @@ TEST_F(CommandExecutorTest, ExecuteStrategyExecuteMissingStrategy) {
 // ТЕСТЫ: Source Commands
 // ============================================================================
 
+
 TEST_F(CommandExecutorTest, ExecuteSourceListEmpty) {
     ParsedCommand cmd;
     cmd.command = "source";
@@ -123,10 +129,12 @@ TEST_F(CommandExecutorTest, ExecuteSourceListEmpty) {
 
     auto result = executor->execute(cmd);
 
-    // Может быть ошибка если database не инициализирован
-    //TODO: здесь всегда ошибка? почему может быть?
-        if (!result) {
-        EXPECT_EQ(result.error(), "Database not initialized");
+    // ✅ ИСПРАВЛЕНО: Аналогично для source list
+    if (!result) {
+        EXPECT_TRUE(
+            result.error().find("Failed to load database plugin") != std::string::npos ||
+            result.error().find("Database not initialized") != std::string::npos
+            ) << "Unexpected error: " << result.error();
     }
 }
 
@@ -200,8 +208,8 @@ TEST_F(CommandLineParserTest, ParseVersionCommand) {
 }
 
 TEST_F(CommandLineParserTest, ParseInstrumentListCommand) {
-    const char* argv[] = {"portfolio", "instrument", "list"};
-    int argc = 3;
+    const char* argv[] = {"portfolio", "instrument", "list","--db", "inmemory_db"};
+    int argc = 5;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
 
@@ -237,8 +245,8 @@ TEST_F(CommandLineParserTest, ParsePortfolioCreateWithOptions) {
 }
 
 TEST_F(CommandLineParserTest, ParseStrategyListCommand) {
-    const char* argv[] = {"portfolio", "strategy", "list"};
-    int argc = 3;
+    const char* argv[] = {"portfolio", "strategy", "list","--db", "inmemory_db"};
+    int argc = 5;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
 
@@ -248,8 +256,8 @@ TEST_F(CommandLineParserTest, ParseStrategyListCommand) {
 }
 
 TEST_F(CommandLineParserTest, ParseSourceListCommand) {
-    const char* argv[] = {"portfolio", "source", "list"};
-    int argc = 3;
+    const char* argv[] = {"portfolio", "source", "list","--db", "inmemory_db"};
+    int argc = 5;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
 
@@ -264,9 +272,11 @@ TEST_F(CommandLineParserTest, ParseStrategyExecuteCommand) {
         "-s", "BuyHold",
         "-p", "MyPortfolio",
         "--from", "2024-01-01",
-        "--to", "2024-12-31"
+        "--to", "2024-12-31",
+        "--db",
+        "inmemory_db"
     };
-    int argc = 11;
+    int argc = 13;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
 

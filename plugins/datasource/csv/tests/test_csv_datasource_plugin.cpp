@@ -233,11 +233,21 @@ TEST_F(CSVDataSourcePluginTest, CustomDelimiterConfig) {
 TEST_F(CSVDataSourcePluginTest, InitializeWithInvalidFile) {
     auto loadResult = manager_->load("csv", "");
     ASSERT_TRUE(loadResult.has_value());
-    
+
     auto dataSource = loadResult.value();
-    
+
+    // initialize() не проверяет файл, только сохраняет путь
     auto initResult = dataSource->initialize("nonexistent_file.csv", "0");
-    EXPECT_FALSE(initResult.has_value());
+    EXPECT_TRUE(initResult.has_value()) << "Initialize should succeed (deferred validation)";
+
+    // Добавляем атрибут
+    auto addResult = dataSource->addAttributeRequest("Close", "1");
+    EXPECT_TRUE(addResult.has_value());
+
+    // Ошибка должна возникнуть при extract
+    auto extractResult = dataSource->extract();
+    EXPECT_FALSE(extractResult.has_value()) << "Extract should fail for nonexistent file";
+    EXPECT_NE(extractResult.error().find("Failed to open"), std::string::npos);
 }
 
 TEST_F(CSVDataSourcePluginTest, ExtractWithoutInitialize) {

@@ -200,55 +200,60 @@ class PluginManager {
         std::vector<AvailablePlugin> available;
 
         // Формируем путь к поддиректории для данного типа плагинов
-        std::filesystem::path typeDir = 
+        std::filesystem::path typeDir =
             std::filesystem::path(pluginPath_) / Traits::subdirectory();
 
-        if (!std::filesystem::exists(typeDir) || 
+        if (!std::filesystem::exists(typeDir) ||
             !std::filesystem::is_directory(typeDir)) {
             return available;
         }
 
-        // Сканируем поддиректорию
+        // ИСПРАВЛЕНИЕ: Сканируем .so файлы напрямую в typeDir (плоская структура)
+        // Вместо поиска подкаталогов, ищем .so файлы напрямую
         for (const auto& entry : std::filesystem::directory_iterator(typeDir)) {
-            if (!entry.is_directory()) {
+            // Пропускаем подкаталоги и не-.so файлы
+            if (!entry.is_regular_file()) {
                 continue;
             }
 
-            std::string pluginName = entry.path().filename().string();
-            
-            // Ищем .so файл с именем плагина
-            std::string soName = pluginName + ".so";
-            std::filesystem::path soPath = entry.path() / soName;
+            std::string filename = entry.path().filename().string();
 
-            if (std::filesystem::exists(soPath)) {
-                // Попробуем загрузить плагин временно, чтобы получить метаданные
-                void* handle = dlopen(soPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
-                if (handle) {
-                    auto getNameFunc = reinterpret_cast<GetNameFunc>(
-                        dlsym(handle, "getPluginName"));
-                    auto getVersionFunc = reinterpret_cast<GetVersionFunc>(
-                        dlsym(handle, "getPluginVersion"));
-                    auto getTypeFunc = reinterpret_cast<GetTypeFunc>(
-                        dlsym(handle, "getPluginType"));
+            // Проверяем расширение .so
+            if (filename.size() < 3 || filename.substr(filename.size() - 3) != ".so") {
+                continue;
+            }
 
-                    AvailablePlugin plugin;
-                    plugin.name = pluginName;
-                    plugin.displayName = getNameFunc ? getNameFunc() : pluginName;
-                    plugin.version = getVersionFunc ? getVersionFunc() : "unknown";
-                    plugin.type = getTypeFunc ? getTypeFunc() : Traits::typeName();
-                    plugin.path = soPath.string();
+            // Получаем имя плагина (убираем .so расширение)
+            std::string pluginName = filename.substr(0, filename.size() - 3);
+            std::filesystem::path soPath = entry.path();
 
-                    available.push_back(plugin);
-                    dlclose(handle);
-                }
+            // Попробуем загрузить плагин временно, чтобы получить метаданные
+            void* handle = dlopen(soPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+            if (handle) {
+                auto getNameFunc = reinterpret_cast<GetNameFunc>(
+                    dlsym(handle, "getPluginName"));
+                auto getVersionFunc = reinterpret_cast<GetVersionFunc>(
+                    dlsym(handle, "getPluginVersion"));
+                auto getTypeFunc = reinterpret_cast<GetTypeFunc>(
+                    dlsym(handle, "getPluginType"));
+
+                AvailablePlugin plugin;
+                plugin.name = pluginName;
+                plugin.displayName = getNameFunc ? getNameFunc() : pluginName;
+                plugin.version = getVersionFunc ? getVersionFunc() : "unknown";
+                plugin.type = getTypeFunc ? getTypeFunc() : Traits::typeName();
+                plugin.path = soPath.string();
+
+                available.push_back(plugin);
+                dlclose(handle);
             }
         }
 
         // Сортируем по имени
         std::sort(available.begin(), available.end(),
-            [](const AvailablePlugin& a, const AvailablePlugin& b) {
-                return a.name < b.name;
-            });
+                  [](const AvailablePlugin& a, const AvailablePlugin& b) {
+                      return a.name < b.name;
+                  });
 
         return available;
     }

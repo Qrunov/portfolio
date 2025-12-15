@@ -4,6 +4,7 @@
 #include "IPortfolioDatabase.hpp"
 #include "IPortfolioManager.hpp"
 #include "IPortfolioStrategy.hpp"
+#include "IDataSource.hpp"
 #include "Portfolio.hpp"
 #include "CSVDataSource.hpp"
 #include "PluginManager.hpp"
@@ -27,8 +28,9 @@ public:
 private:
     std::shared_ptr<IPortfolioDatabase> database_;
     std::unique_ptr<IPortfolioManager> portfolioManager_;
-    std::unique_ptr<PluginManager<IPortfolioDatabase>> pluginManager_;
+    std::unique_ptr<PluginManager<IPortfolioDatabase>> databasePluginManager_;
     std::unique_ptr<PluginManager<IPortfolioStrategy>> strategyPluginManager_;
+    std::unique_ptr<PluginManager<IDataSource>>  dataSourcePluginManager_;
 
     // Help & Version
     std::expected<void, std::string> executeHelp(const ParsedCommand& cmd);
@@ -69,8 +71,7 @@ private:
     std::expected<void, std::string> executePlugin(const ParsedCommand& cmd);
     std::expected<void, std::string> executePluginList(const ParsedCommand& cmd);
     std::expected<void, std::string> executePluginInfo(const ParsedCommand& cmd);
-
-
+    std::expected<void, std::string> executePlugins(const ParsedCommand& cmd);
 
     // Helper Methods
     template<typename T>

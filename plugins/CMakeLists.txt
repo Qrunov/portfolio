@@ -1,15 +1,12 @@
 # ============================================================================
-# Portfolio Plugins
+# Plugins
 # ============================================================================
 
 message(STATUS "Configuring plugins...")
 
-# Add database plugins
+# Каждый тип плагина - отдельная поддиректория
 add_subdirectory(database)
-
-# Add strategy plugins
 add_subdirectory(strategy)
+add_subdirectory(datasource)
 
-# Future plugin types can be added here:
-# add_subdirectory(datasource)
-# add_subdirectory(optimizer)
+message(STATUS "All plugins configured")

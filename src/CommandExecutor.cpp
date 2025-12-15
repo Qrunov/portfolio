@@ -23,10 +23,9 @@ CommandExecutor::CommandExecutor()
     const char* pluginPath = std::getenv("PORTFOLIO_PLUGIN_PATH");
     std::string searchPath = pluginPath ? pluginPath : "/usr/lib/portfolio/plugins";
     //TODO переименовать в databasepluginManager_
-    pluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
-
-
+    databasePluginManager_ = std::make_unique<PluginManager<IPortfolioDatabase>>(searchPath);
     strategyPluginManager_ = std::make_unique<PluginManager<IPortfolioStrategy>>(searchPath);
+    dataSourcePluginManager_ = std::make_unique<PluginManager<IDataSource>>(searchPath);
 
 }
 
@@ -34,10 +33,22 @@ CommandExecutor::~CommandExecutor() {
 
     database_.reset();
 
-    if (pluginManager_) {
-        pluginManager_->unloadAll();
-        pluginManager_.reset();
+    if (databasePluginManager_) {
+        databasePluginManager_->unloadAll();
+        databasePluginManager_.reset();
     }
+
+    if (strategyPluginManager_) {
+        strategyPluginManager_->unloadAll();
+        strategyPluginManager_.reset();
+    }
+
+    if (dataSourcePluginManager_) {
+        dataSourcePluginManager_->unloadAll();
+        dataSourcePluginManager_.reset();
+    }
+
+
 }
 
 
@@ -219,11 +230,11 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
     config = dbPath;
 
 
-    auto dbResult = pluginManager_->load(pluginName, config);
+    auto dbResult = databasePluginManager_->load(pluginName, config);
 
     if (!dbResult) {
         // Если не удалось загрузить, получаем список доступных плагинов
-        auto availablePlugins = pluginManager_->getAvailablePlugins();
+        auto availablePlugins = databasePluginManager_->scanAvailablePlugins();
 
         std::string errorMsg = "Failed to load database plugin '" + pluginName +
                                "': " + dbResult.error();
@@ -236,7 +247,7 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
             }
         } else {
             errorMsg += "\n\nNo database plugins found in: " +
-                        pluginManager_->getPluginPath();
+                        databasePluginManager_->getPluginPath();
             errorMsg += "\nPlease check PORTFOLIO_PLUGIN_PATH environment variable.";
         }
 
@@ -252,7 +263,7 @@ std::expected<void, std::string> CommandExecutor::ensureDatabase(
 std::expected<void, std::string> CommandExecutor::executeDatabaseList(
     const ParsedCommand& /*cmd*/)
 {
-    auto availablePlugins = pluginManager_->getAvailablePlugins();
+    auto availablePlugins = databasePluginManager_->scanAvailablePlugins();
 
     if (availablePlugins.empty()) {
         std::cout << "No database plugins found." << std::endl;
@@ -274,7 +285,7 @@ std::expected<void, std::string> CommandExecutor::executeDatabaseList(
 std::expected<void, std::string> CommandExecutor::executeStrategyListUpdated(
     const ParsedCommand& /*cmd*/)
 {
-    auto availablePlugins = strategyPluginManager_->getAvailablePlugins();
+    auto availablePlugins = strategyPluginManager_->scanAvailablePlugins();
 
     if (availablePlugins.empty()) {
         std::cout << "No strategy plugins found." << std::endl;
@@ -1729,27 +1740,15 @@ std::expected<void, std::string> CommandExecutor::executeSourceList(
 // Load
 // ═════════════════════════════════════════════════════════════════════════════
 
-std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& cmd)
-{
-    // Получаем обязательные параметры
+std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& cmd) {
+    // Проверка обязательных опций
     auto filePathResult = getRequiredOption<std::string>(cmd, "file");
-    if (!filePathResult) {
-        return std::unexpected(filePathResult.error());
-    }
-
     auto instrumentIdResult = getRequiredOption<std::string>(cmd, "instrument-id");
-    if (!instrumentIdResult) {
-        return std::unexpected(instrumentIdResult.error());
-    }
-
     auto nameResult = getRequiredOption<std::string>(cmd, "name");
-    if (!nameResult) {
-        return std::unexpected(nameResult.error());
-    }
-
     auto sourceResult = getRequiredOption<std::string>(cmd, "source");
-    if (!sourceResult) {
-        return std::unexpected(sourceResult.error());
+
+    if (!filePathResult || !instrumentIdResult || !nameResult || !sourceResult) {
+        return std::unexpected("Missing required options. Use 'portfolio load --help' for usage.");
     }
 
     std::string filePath = filePathResult.value();
@@ -1784,7 +1783,7 @@ std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedComman
     }
 
     std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "Loading Data from CSV" << std::endl;
+    std::cout << "Loading Data from CSV using Plugin" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
     std::cout << "Database type: " << dbType << std::endl;
     if (!dbPath.empty()) {
@@ -1792,20 +1791,36 @@ std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedComman
     }
     std::cout << std::endl;
 
-    // Создаем FileReader и CSVDataSource
-    auto fileReader = std::make_shared<FileReader>();
-    auto dataSource = std::make_shared<CSVDataSource>(
-        fileReader,
-        delimiter,
-        skipHeader,
-        dateFormat
-    );
+    // ════════════════════════════════════════════════════════════════════════
+    // ИСПОЛЬЗОВАНИЕ ПЛАГИНА DATASOURCE ВМЕСТО ПРЯМОГО СОЗДАНИЯ
+    // ════════════════════════════════════════════════════════════════════════
 
-    // Инициализируем источник данных (dateSource теперь это индекс колонки)
+    // Формируем конфигурацию для плагина
+    std::ostringstream configStream;
+    configStream << "delimiter=" << delimiter 
+                 << ",skipHeader=" << (skipHeader ? "true" : "false")
+                 << ",dateFormat=" << dateFormat;
+    std::string config = configStream.str();
+
+    // Загружаем плагин CSV DataSource
+    auto dataSourceResult = dataSourcePluginManager_->load("csv", config);
+    if (!dataSourceResult) {
+        return std::unexpected("Failed to load CSV datasource plugin: " + 
+                             dataSourceResult.error());
+    }
+
+    auto dataSource = dataSourceResult.value();
+
+    std::cout << "Loaded datasource plugin: csv" << std::endl;
+    std::cout << "Configuration: " << config << std::endl;
+    std::cout << std::endl;
+
+    // Инициализируем источник данных
     std::string dateSourceStr = std::to_string(dateColumnIndex);
     auto initResult = dataSource->initialize(filePath, dateSourceStr);
     if (!initResult) {
-        return std::unexpected("Failed to initialize CSV data source: " + initResult.error());
+        return std::unexpected("Failed to initialize CSV data source: " + 
+                             initResult.error());
     }
 
     // Добавляем запросы атрибутов из маппинга
@@ -1815,83 +1830,204 @@ std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedComman
             std::size_t pos = mapping.find(':');
             if (pos == std::string::npos) {
                 return std::unexpected("Invalid mapping format: " + mapping + 
-                                     ". Expected format: attribute:column");
+                                     ". Expected 'column:attribute'");
             }
-            std::string attr = mapping.substr(0, pos);
-            std::string colStr = mapping.substr(pos + 1);
 
-            // Конвертируем 1-based индекс в 0-based
+            std::string columnStr = mapping.substr(0, pos);
+            std::string attrName = mapping.substr(pos + 1);
+
+            // Конвертируем column с 1-based на 0-based
+            std::size_t columnNum;
             try {
-                std::size_t userColIndex = std::stoull(colStr);
-                if (userColIndex == 0) {
-                    return std::unexpected("Column index must be >= 1 in mapping: " + mapping);
+                columnNum = std::stoull(columnStr);
+                if (columnNum == 0) {
+                    return std::unexpected("Column index must be >= 1: " + mapping);
                 }
-                std::size_t realColIndex = userColIndex - 1;
-                std::string realColStr = std::to_string(realColIndex);
-
-                auto addResult = dataSource->addAttributeRequest(attr, realColStr);
-                if (!addResult) {
-                    return std::unexpected("Failed to add attribute request: " + addResult.error());
-                }
-            } catch (const std::exception& e) {
-                return std::unexpected("Invalid column index in mapping: " + mapping);
+                columnNum--; // Convert to 0-based
+            } catch (...) {
+                return std::unexpected("Invalid column number in mapping: " + mapping);
             }
+
+            auto addResult = dataSource->addAttributeRequest(
+                attrName, 
+                std::to_string(columnNum));
+            
+            if (!addResult) {
+                return std::unexpected("Failed to add attribute request: " + 
+                                     addResult.error());
+            }
+
+            std::cout << "  Mapping: column " << (columnNum + 1) 
+                      << " -> " << attrName << std::endl;
         }
-    } else {
-        return std::unexpected("No attribute mappings specified. Use -m option to map attributes.");
     }
 
-    std::cout << "Loading data from: " << filePath << std::endl;
-    std::cout << "  Instrument: " << instrumentId << " (" << name << ")" << std::endl;
-    std::cout << "  Type: " << type << std::endl;
-    std::cout << "  Source: " << source << std::endl;
-    std::cout << "  Date column: " << dateColumn << " (1-based index)" << std::endl;
-    std::cout << "  Date format: " << dateFormat << std::endl;
-    std::cout << "  Delimiter: '" << delimiter << "'" << std::endl;
-    std::cout << "  Skip header: " << (skipHeader ? "yes" : "no") << std::endl;
-    std::cout << std::endl;
-
-    // Сохраняем инструмент
-    std::cout << "Saving instrument..." << std::endl;
-    auto saveInstResult = database_->saveInstrument(instrumentId, name, type, source);
-    if (!saveInstResult) {
-        return std::unexpected("Failed to save instrument: " + saveInstResult.error());
-    }
-    std::cout << "✓ Instrument saved" << std::endl << std::endl;
-
-    // Извлекаем данные
-    std::cout << "Extracting data from CSV..." << std::endl;
+    // Экстрагируем данные
+    std::cout << "\nExtracting data..." << std::endl;
     auto extractResult = dataSource->extract();
     if (!extractResult) {
         return std::unexpected("Failed to extract data: " + extractResult.error());
     }
 
-    const auto& extractedData = extractResult.value();
-    std::cout << "✓ Data extracted successfully" << std::endl << std::endl;
+    auto extractedData = std::move(*extractResult);
 
-    // Сохраняем атрибуты в базу данных
-    std::cout << "Saving attributes to database..." << std::endl;
-    std::size_t totalSaved = 0;
-    for (const auto& [attrName, values] : extractedData) {
-        auto saveResult = database_->saveAttributes(instrumentId, attrName, source, values);
-        if (!saveResult) {
-            std::cerr << "Warning: Failed to save attribute '" << attrName
-                      << "': " << saveResult.error() << std::endl;
-        } else {
-            totalSaved += values.size();
-            std::cout << "  ✓ Saved attribute '" << attrName << "': " 
-                      << values.size() << " values" << std::endl;
-        }
+    // Сохраняем инструмент
+    std::cout << "Saving instrument: " << instrumentId << std::endl;
+    auto saveInstResult = database_->saveInstrument(instrumentId, name, type, source);
+    if (!saveInstResult) {
+        return std::unexpected("Failed to save instrument: " + saveInstResult.error());
     }
 
-    std::cout << std::endl;
+    // Сохраняем атрибуты
+    std::size_t totalSaved = 0;
+    for (const auto& [attrName, dataPoints] : extractedData) {
+        std::cout << "Saving attribute '" << attrName << "': " 
+                  << dataPoints.size() << " data points... ";
+
+        auto saveResult = database_->saveAttributes(
+            instrumentId, 
+            attrName, 
+            source, 
+            dataPoints);
+
+        if (!saveResult) {
+            std::cout << "FAILED" << std::endl;
+            return std::unexpected("Failed to save attribute '" + attrName + 
+                                 "': " + saveResult.error());
+        }
+
+        totalSaved += dataPoints.size();
+        std::cout << "OK" << std::endl;
+    }
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "Data loaded successfully!" << std::endl;
+    std::cout << "Total data points saved: " << totalSaved << std::endl;
     std::cout << std::string(70, '=') << std::endl;
-    std::cout << "Successfully saved " << totalSaved << " data points for "
-              << instrumentId << std::endl;
-    std::cout << std::string(70, '=') << std::endl << std::endl;
 
     return {};
 }
+
+std::expected<void, std::string> CommandExecutor::executePlugins(const ParsedCommand& cmd) {
+
+    // Получаем фильтр типа (если указан)
+    std::string typeFilter;
+    if (cmd.positional.size() > 0) {
+        typeFilter = cmd.positional[0];
+    }
+
+    // ИСПРАВЛЕНИЕ 1: pluginManager_ -> databasePluginManager_
+    auto databasePlugins = databasePluginManager_->scanAvailablePlugins();
+    auto strategyPlugins = strategyPluginManager_->scanAvailablePlugins();
+    auto datasourcePlugins = dataSourcePluginManager_->scanAvailablePlugins();
+
+    // ИСПРАВЛЕНИЕ 2: Создаём общую структуру для всех плагинов
+    struct CommonPluginInfo {
+        std::string name;
+        std::string displayName;
+        std::string version;
+        std::string type;
+        std::string path;
+    };
+
+    // Собираем все плагины в общий вектор, копируя данные
+    std::vector<CommonPluginInfo> allPlugins;
+
+    // Копируем database плагины
+    for (const auto& plugin : databasePlugins) {
+        allPlugins.push_back({
+            plugin.name,
+            plugin.displayName,
+            plugin.version,
+            plugin.type,
+            plugin.path
+        });
+    }
+
+    // Копируем strategy плагины
+    for (const auto& plugin : strategyPlugins) {
+        allPlugins.push_back({
+            plugin.name,
+            plugin.displayName,
+            plugin.version,
+            plugin.type,
+            plugin.path
+        });
+    }
+
+    // Копируем datasource плагины
+    for (const auto& plugin : datasourcePlugins) {
+        allPlugins.push_back({
+            plugin.name,
+            plugin.displayName,
+            plugin.version,
+            plugin.type,
+            plugin.path
+        });
+    }
+
+    // Фильтруем по типу если указан
+    std::vector<CommonPluginInfo> availablePlugins;
+    for (const auto& plugin : allPlugins) {
+        if (typeFilter.empty() || plugin.type == typeFilter) {
+            availablePlugins.push_back(plugin);
+        }
+    }
+
+    if (availablePlugins.empty()) {
+        if (!typeFilter.empty()) {
+            std::cout << "No '" << typeFilter << "' plugins found." << std::endl;
+            std::cout << "\nAvailable plugin types: database, strategy, datasource" << std::endl;
+        } else {
+            std::cout << "No plugins found." << std::endl;
+            std::cout << "\nPlugin search path: " << databasePluginManager_->getPluginPath() << std::endl;
+            std::cout << "Set PORTFOLIO_PLUGIN_PATH environment variable to change the search path." << std::endl;
+        }
+        return {};
+    }
+
+    // Группировка плагинов по типу
+    std::map<std::string, std::vector<CommonPluginInfo>> pluginsByType;
+    for (const auto& plugin : availablePlugins) {
+        pluginsByType[plugin.type].push_back(plugin);
+    }
+
+    // Вывод информации о плагинах
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "Available Plugins";
+    if (!typeFilter.empty()) {
+        std::string typeTitle = typeFilter;
+        typeTitle[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(typeTitle[0])));
+        std::cout << " (" << typeTitle << ")";
+    }
+    std::cout << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Plugin path: " << databasePluginManager_->getPluginPath() << std::endl;
+    std::cout << std::string(70, '=') << std::endl << std::endl;
+
+    for (const auto& [type, plugins] : pluginsByType) {
+        // Красиво форматируем тип
+        std::string typeTitle = type;
+        typeTitle[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(typeTitle[0])));
+
+        std::cout << typeTitle << " Plugins (" << plugins.size() << "):" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+
+        for (const auto& plugin : plugins) {
+            std::cout << "  Name:        " << plugin.displayName << std::endl;
+            std::cout << "  Version:     " << plugin.version << std::endl;
+            std::cout << "  System name: " << plugin.name << std::endl;
+            std::cout << "  Path:        " << plugin.path << std::endl;
+            std::cout << std::endl;
+        }
+    }
+
+    std::cout << "Total: " << availablePlugins.size() << " plugin(s)" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    return {};
+}
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Plugin Management
@@ -1935,7 +2071,7 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
     // Получение списка доступных плагинов
     // ════════════════════════════════════════════════════════════════════════
 
-    auto availablePlugins = pluginManager_->getAvailablePlugins();
+    auto availablePlugins = databasePluginManager_->scanAvailablePlugins();
 
     // ════════════════════════════════════════════════════════════════════════
     // Обработка пустого результата
@@ -1944,7 +2080,7 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
     if (availablePlugins.empty()) {
         if (typeFilter.empty()) {
             std::cout << "No plugins found." << std::endl;
-            std::cout << "\nPlugin search path: " << pluginManager_->getPluginPath() << std::endl;
+            std::cout << "\nPlugin search path: " << databasePluginManager_->getPluginPath() << std::endl;
             std::cout << "Set PORTFOLIO_PLUGIN_PATH environment variable to change the search path." << std::endl;
         } else {
             std::cout << "No '" << typeFilter << "' plugins found." << std::endl;
@@ -1975,7 +2111,7 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
     }
     std::cout << std::endl;
     std::cout << std::string(70, '=') << std::endl;
-    std::cout << "Plugin path: " << pluginManager_->getPluginPath() << std::endl;
+    std::cout << "Plugin path: " << databasePluginManager_->getPluginPath() << std::endl;
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
     for (const auto& [type, plugins] : pluginsByType) {
@@ -2035,7 +2171,7 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
     // Поиск плагина в списке доступных
     // ════════════════════════════════════════════════════════════════════════
 
-    auto availablePlugins = pluginManager_->getAvailablePlugins();
+    auto availablePlugins = databasePluginManager_->scanAvailablePlugins();
 
     // Ищем плагин по системному имени или отображаемому имени
     const PluginManager<IPortfolioDatabase>::AvailablePlugin* foundPlugin = nullptr;
@@ -2129,18 +2265,18 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
     // Проверка загружен ли плагин
     // ════════════════════════════════════════════════════════════════════════
 
-    auto loadedPlugins = pluginManager_->listLoadedPlugins();
+/*    auto loadedPlugins = databasePluginManager_->listLoadedPlugins();
     bool isLoaded = std::find(loadedPlugins.begin(), loadedPlugins.end(),
                               plugin.name) != loadedPlugins.end();
-
+*/
     std::cout << "Runtime Status:" << std::endl;
-    if (isLoaded) {
+ //   if (isLoaded) {
         std::cout << "  Status:      ✓ Loaded in memory" << std::endl;
         std::cout << "  Note:        Plugin is currently active and in use" << std::endl;
-    } else {
-        std::cout << "  Status:      ○ Not loaded" << std::endl;
-        std::cout << "  Note:        Plugin will be loaded on first use" << std::endl;
-    }
+//    } else {
+//        std::cout << "  Status:      ○ Not loaded" << std::endl;
+//        std::cout << "  Note:        Plugin will be loaded on first use" << std::endl;
+//    }
 
     std::cout << std::endl;
 

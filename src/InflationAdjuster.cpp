@@ -1,9 +1,10 @@
-// src/InflationAdjuster.cpp
 #include "InflationAdjuster.hpp"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <cmath>
+#include <numeric>
+#include <algorithm>
 
 namespace portfolio {
 
@@ -49,15 +50,6 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
     std::cout << "Instrument: " << instrumentId << std::endl;
 
     // Загружаем данные по инфляции
-    // Расширяем диапазон на месяц назад и вперёд для полного покрытия
-//  auto expandedStart = startDate - std::chrono::hours(24 * 31);
-//  auto expandedEnd = endDate + std::chrono::hours(24 * 31);
-
-//    auto inflationData = database->getAttributeHistory(
-//        instrumentId, "close", expandedStart, expandedEnd, "");
-    //TODO: здесь startDate нужно приводить к началу месяца, иначе не выберем первый месяц
-
-
     auto inflationData = database->getAttributeHistory(
         instrumentId, "close", startDate, endDate, "");
 
@@ -66,7 +58,6 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
         std::cout << "  Inflation adjustment will be skipped" << std::endl;
         std::cout << std::string(70, '=') << "\n" << std::endl;
 
-        // Возвращаем пустой корректор
         return InflationAdjuster(
             database,
             std::map<std::string, double>{},
@@ -75,10 +66,16 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
             endDate);
     }
 
+    std::cout << "  Raw data points loaded: " << inflationData->size() << std::endl;
+
     // Преобразуем данные в месячную инфляцию
     std::map<std::string, double> monthlyInflation;
     TimePoint dataStart = inflationData->front().first;
     TimePoint dataEnd = inflationData->back().first;
+
+    // Собираем статистику
+    std::vector<double> allValues;
+    size_t duplicateCount = 0;
 
     for (const auto& [timestamp, value] : *inflationData) {
         std::string monthKey = getMonthKey(timestamp);
@@ -90,8 +87,16 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
             inflationRate = static_cast<double>(std::get<std::int64_t>(value));
         }
 
-        // Сохраняем месячную инфляцию в процентах
-        monthlyInflation[monthKey] = inflationRate;
+        allValues.push_back(inflationRate);
+
+        if (monthlyInflation.count(monthKey) > 0) {
+            duplicateCount++;
+        }
+
+        // ⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
+        // Данные из БД приходят как ПРОЦЕНТЫ (0.96)
+        // Конвертируем в ДЕСЯТИЧНЫЕ ДРОБИ (0.0096) сразу!
+        monthlyInflation[monthKey] = inflationRate / 100.0;
     }
 
     if (monthlyInflation.empty()) {
@@ -106,8 +111,38 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
             endDate);
     }
 
-    std::cout << "✓ Inflation data loaded successfully" << std::endl;
-    std::cout << "  Data points: " << monthlyInflation.size() << " months" << std::endl;
+    // Диагностика
+    std::cout << "\n  DIAGNOSTIC INFORMATION:" << std::endl;
+    std::cout << "  ════════════════════════════════════════════════" << std::endl;
+
+    if (duplicateCount > 0) {
+        std::cout << "  ⚠ Found " << duplicateCount << " duplicate months!" << std::endl;
+    }
+
+    if (!allValues.empty()) {
+        double minVal = *std::min_element(allValues.begin(), allValues.end());
+        double maxVal = *std::max_element(allValues.begin(), allValues.end());
+        double avgVal = std::accumulate(allValues.begin(), allValues.end(), 0.0) / allValues.size();
+
+        std::cout << "  Value statistics:" << std::endl;
+        std::cout << "    Min:     " << std::fixed << std::setprecision(2) << minVal << "%" << std::endl;
+        std::cout << "    Max:     " << maxVal << "%" << std::endl;
+        std::cout << "    Average: " << avgVal << "%" << std::endl;
+
+        int anomalyCount = 0;
+        for (double val : allValues) {
+            if (std::abs(val) > 20.0) anomalyCount++;
+        }
+
+        if (anomalyCount > 0) {
+            std::cout << "\n  ⚠⚠⚠ ANOMALIES: " << anomalyCount << " months with |rate| > 20%!" << std::endl;
+        }
+    }
+
+    std::cout << "  ════════════════════════════════════════════════" << std::endl;
+
+    std::cout << "\n✓ Inflation data processed successfully" << std::endl;
+    std::cout << "  Unique months: " << monthlyInflation.size() << std::endl;
     std::cout << "  Coverage: ";
 
     auto time = std::chrono::system_clock::to_time_t(dataStart);
@@ -116,21 +151,32 @@ std::expected<InflationAdjuster, std::string> InflationAdjuster::create(
     time = std::chrono::system_clock::to_time_t(dataEnd);
     std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d") << std::endl;
 
-    //TODO: надо подрезать краевые месяцы, посчитав для них ежедневную инфляцию и скорректировать месячное значение вычтя дни за границами интервала
-
-    // Показываем примеры данных
-    if (monthlyInflation.size() <= 6) {
+    // Показываем примеры (умножаем на 100 для отображения)
+    if (monthlyInflation.size() <= 12) {
         std::cout << "\n  Monthly inflation rates:" << std::endl;
         for (const auto& [month, rate] : monthlyInflation) {
-            std::cout << "    " << month << ": " << rate << "%" << std::endl;
+            std::cout << "    " << month << ": " << std::fixed
+                      << std::setprecision(2) << (rate * 100.0) << "%" << std::endl;
         }
     } else {
-        std::cout << "\n  Sample inflation rates:" << std::endl;
+        std::cout << "\n  Sample inflation rates (first 5 and last 5):" << std::endl;
         auto it = monthlyInflation.begin();
-        for (int i = 0; i < 3 && it != monthlyInflation.end(); ++i, ++it) {
-            std::cout << "    " << it->first << ": " << it->second << "%" << std::endl;
+        for (int i = 0; i < 5 && it != monthlyInflation.end(); ++i, ++it) {
+            std::cout << "    " << it->first << ": " << std::fixed
+                      << std::setprecision(2) << (it->second * 100.0) << "%" << std::endl;
         }
         std::cout << "    ..." << std::endl;
+
+        auto rit = monthlyInflation.rbegin();
+        std::vector<std::pair<std::string, double>> lastFive;
+        for (int i = 0; i < 5 && rit != monthlyInflation.rend(); ++i, ++rit) {
+            lastFive.push_back(*rit);
+        }
+        std::reverse(lastFive.begin(), lastFive.end());
+        for (const auto& [month, rate] : lastFive) {
+            std::cout << "    " << month << ": " << std::fixed
+                      << std::setprecision(2) << (rate * 100.0) << "%" << std::endl;
+        }
     }
 
     std::cout << std::string(70, '=') << "\n" << std::endl;
@@ -159,7 +205,6 @@ double InflationAdjuster::getCumulativeInflation(
         return 0.0;
     }
 
-    // Получаем год и месяц для начала и конца периода
     auto startTimeT = std::chrono::system_clock::to_time_t(startDate);
     auto endTimeT = std::chrono::system_clock::to_time_t(endDate);
 
@@ -175,32 +220,34 @@ double InflationAdjuster::getCumulativeInflation(
 #endif
 
     int startYear = startTm.tm_year + 1900;
-    int startMonth = startTm.tm_mon;  // 0-11
+    int startMonth = startTm.tm_mon;
     int endYear = endTm.tm_year + 1900;
-    int endMonth = endTm.tm_mon;      // 0-11
+    int endMonth = endTm.tm_mon;
 
-    // Итерируемся по месяцам периода
-    double cumulativeInflation = 1.0;  // Начинаем с 1.0 (100%)
+    double cumulativeInflation = 1.0;
 
+    // ИСПРАВЛЕНИЕ: Начинаем со следующего месяца после startDate
     int currentYear = startYear;
-    int currentMonth = startMonth;
+    int currentMonth = startMonth + 1;
 
-    // Проходим по всем месяцам включительно
+    if (currentMonth > 11) {
+        currentMonth = 0;
+        currentYear++;
+    }
+
     while (currentYear < endYear || (currentYear == endYear && currentMonth <= endMonth)) {
-        // Формируем ключ месяца YYYY-MM
         std::ostringstream oss;
         oss << currentYear << "-"
             << std::setfill('0') << std::setw(2) << (currentMonth + 1);
         std::string monthKey = oss.str();
 
-        // Получаем инфляцию за месяц
         double monthlyRate = getMonthlyInflation(monthKey);
 
-        // Применяем месячную инфляцию
-        // Формула: новая_стоимость = старая_стоимость * (1 + rate/100)
-        cumulativeInflation *= (1.0 + monthlyRate / 100.0);
+        // ⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
+        // monthlyRate уже в десятичном формате (0.0096),
+        // поэтому НЕ делим на 100!
+        cumulativeInflation *= (1.0 + monthlyRate);
 
-        // Переходим к следующему месяцу
         currentMonth++;
         if (currentMonth > 11) {
             currentMonth = 0;
@@ -208,7 +255,6 @@ double InflationAdjuster::getCumulativeInflation(
         }
     }
 
-    // Возвращаем процентное изменение
     return (cumulativeInflation - 1.0) * 100.0;
 }
 
@@ -222,19 +268,17 @@ double InflationAdjuster::adjustReturn(
     const TimePoint& endDate) const noexcept
 {
     if (monthlyInflation_.empty()) {
-        return nominalReturn;  // Нет данных - возвращаем номинальную
+        return nominalReturn;
     }
 
     double inflationRate = getCumulativeInflation(startDate, endDate);
 
-    // Формула Фишера: (1 + r_real) = (1 + r_nom) / (1 + r_inf)
-    // r_real = [(1 + r_nom) / (1 + r_inf)] - 1
-
+    // Формула Фишера
     double nominalMultiplier = 1.0 + (nominalReturn / 100.0);
     double inflationMultiplier = 1.0 + (inflationRate / 100.0);
 
     if (inflationMultiplier == 0.0) {
-        return nominalReturn;  // Избегаем деления на ноль
+        return nominalReturn;
     }
 
     double realMultiplier = nominalMultiplier / inflationMultiplier;
@@ -250,7 +294,6 @@ double InflationAdjuster::adjustReturn(
 std::string InflationAdjuster::getMonthKey(const TimePoint& date) noexcept
 {
     auto timeT = std::chrono::system_clock::to_time_t(date);
-
 
     std::tm tm;
 #ifdef _WIN32
@@ -271,7 +314,6 @@ double InflationAdjuster::getMonthlyInflation(const std::string& monthKey) const
         return it->second;
     }
 
-    // Если данных за месяц нет - используем 0% (без инфляции)
     return 0.0;
 }
 

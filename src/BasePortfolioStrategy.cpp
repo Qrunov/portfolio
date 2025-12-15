@@ -993,7 +993,7 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         result.hasInflationData = true;
 
         result.cumulativeInflation = inflationAdjuster_->getCumulativeInflation(
-                                         startDate, endDate) * 100.0;
+            startDate, endDate);
 
         double inflationFactor = 1.0 + (result.cumulativeInflation / 100.0);
         result.realFinalValue = result.finalValue / inflationFactor;

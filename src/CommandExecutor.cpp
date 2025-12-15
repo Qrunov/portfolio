@@ -1669,8 +1669,33 @@ std::expected<void, std::string> CommandExecutor::executeSource(const ParsedComm
 }
 
 std::expected<void, std::string> CommandExecutor::executeSourceList(
-    const ParsedCommand& /*cmd*/)
+    const ParsedCommand& cmd)  // ← ИСПРАВЛЕНО: убрали /**/
 {
+    // ════════════════════════════════════════════════════════════════════════
+    // Инициализация базы данных из опций командной строки
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string dbType = "inmemory_db";
+    std::string dbPath;
+
+    if (cmd.options.count("db")) {
+        dbType = cmd.options.at("db").as<std::string>();
+    }
+
+    if (cmd.options.count("db-path")) {
+        dbPath = cmd.options.at("db-path").as<std::string>();
+    }
+
+    // Инициализируем базу данных если необходимо
+    auto dbResult = ensureDatabase(dbType, dbPath);
+    if (!dbResult) {
+        return std::unexpected(dbResult.error());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Получение списка источников данных
+    // ════════════════════════════════════════════════════════════════════════
+
     if (!database_) {
         return std::unexpected("Database not initialized");
     }
@@ -1681,6 +1706,11 @@ std::expected<void, std::string> CommandExecutor::executeSourceList(
     }
 
     const auto& sources = result.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод результатов
+    // ════════════════════════════════════════════════════════════════════════
+
     if (sources.empty()) {
         std::cout << "No sources found." << std::endl;
     } else {

@@ -1251,13 +1251,13 @@ std::expected<void, std::string> CommandExecutor::executePortfolioSetParam(
 // ═════════════════════════════════════════════════════════════════════════════
 // Strategy Management
 // ═════════════════════════════════════════════════════════════════════════════
-
 std::expected<void, std::string> CommandExecutor::executeStrategy(const ParsedCommand& cmd)
 {
     if (cmd.subcommand.empty()) {
         std::cout << "\nSTRATEGY COMMANDS:" << std::endl;
         std::cout << "  strategy list                List available strategies" << std::endl;
-        std::cout << "  strategy params -s STRATEGY Show strategy parameters" << std::endl;
+        std::cout << "  strategy info -s STRATEGY    Show strategy information" << std::endl;
+        std::cout << "  strategy params -s STRATEGY  Show strategy parameters" << std::endl;
         std::cout << "  strategy execute -s STRATEGY Execute backtest" << std::endl;
         std::cout << "\nUse 'portfolio help strategy' for detailed information" << std::endl;
         std::cout << std::endl;
@@ -1266,6 +1266,8 @@ std::expected<void, std::string> CommandExecutor::executeStrategy(const ParsedCo
 
     if (cmd.subcommand == "list") {
         return executeStrategyList(cmd);
+    } else if (cmd.subcommand == "info") {          // ← ДОБАВЛЕНО!
+        return executeStrategyParams(cmd);           // ← info = params
     } else if (cmd.subcommand == "params") {
         return executeStrategyParams(cmd);
     } else if (cmd.subcommand == "execute") {

@@ -176,7 +176,7 @@
             ("from", po::value<std::string>(), "Start date (YYYY-MM-DD)")
             ("to", po::value<std::string>(), "End date (YYYY-MM-DD)")
             ("initial-capital", po::value<double>(), "Initial capital")
-            ("db", po::value<std::string>()->required(), "Database type")
+            ("db", po::value<std::string>(), "Database type")
             ("db-path", po::value<std::string>(), "Database path")
 
             ("param,P", po::value<std::vector<std::string>>()->multitoken(),

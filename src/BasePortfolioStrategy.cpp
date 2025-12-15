@@ -950,17 +950,42 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         }
     }
 
-    // Max drawdown
-    double peak = dailyValues[0];
+
+    // Max drawdown - пропускаем нули и отрицательные значения
+    double peak = 0.0;
+    bool peakInitialized = false;
+
     for (double value : dailyValues) {
+        // Пропускаем нули и отрицательные значения
+        if (value <= 0.0) {
+            continue;
+        }
+
+        // Инициализируем пик первым положительным значением
+        if (!peakInitialized) {
+            peak = value;
+            peakInitialized = true;
+            continue;
+        }
+
+        // Обновляем пик
         if (value > peak) {
             peak = value;
         }
+
+        // Рассчитываем drawdown
         double drawdown = ((peak - value) / peak) * 100.0;
         if (drawdown > result.maxDrawdown) {
             result.maxDrawdown = drawdown;
         }
     }
+
+
+
+
+    std::cout << std::endl;
+
+
 
     // Sharpe Ratio
     if (result.volatility > 0) {
@@ -978,15 +1003,27 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         result.taxSummary = taxSummary;
 
         if (initialCapital > 0) {
+            // finalValue УЖЕ учитывает уплаченные налоги (они были вычтены во время бэктеста)
             result.afterTaxFinalValue = result.finalValue;
-            result.afterTaxReturn = ((result.afterTaxFinalValue - initialCapital) /
-                                     initialCapital) * 100.0;
+            result.afterTaxReturn = result.totalReturn;
 
-            if (result.totalReturn > 0) {
-                result.taxEfficiency = (result.afterTaxReturn / result.totalReturn) * 100.0;
+            // Рассчитываем гипотетическую доходность БЕЗ налогов
+            // (если бы налоги не платили, а все средства остались в портфеле)
+            double preTaxFinalValue = result.finalValue + result.totalTaxesPaid;
+            double preTaxReturn = ((preTaxFinalValue - initialCapital) /
+                                   initialCapital) * 100.0;
+
+            // Tax efficiency = сколько % доходности осталось после налогов
+            if (preTaxReturn > 0) {
+                result.taxEfficiency = (result.totalReturn / preTaxReturn) * 100.0;
+            } else {
+                result.taxEfficiency = 100.0;
             }
         }
     }
+
+
+
 
     // Инфляция
     if (inflationAdjuster_ && inflationAdjuster_->hasData()) {
@@ -1068,11 +1105,25 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
         std::cout << "\nTax Metrics:" << std::endl;
         std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
                   << result.totalTaxesPaid << std::endl;
+
+        double preTaxFinalValue = result.finalValue + result.totalTaxesPaid;
+        double preTaxReturn = 0.0;
+        if (result.finalValue > 0) {
+            // Находим initial capital (обратно из total return)
+            double initialCapital = result.finalValue / (1.0 + result.totalReturn / 100.0);
+            preTaxReturn = ((preTaxFinalValue - initialCapital) / initialCapital) * 100.0;
+        }
+
+        std::cout << "  Pre-Tax Return:      " << std::setprecision(2)
+                  << preTaxReturn << "%" << std::endl;
         std::cout << "  After-Tax Return:    " << std::setprecision(2)
                   << result.afterTaxReturn << "%" << std::endl;
+
         std::cout << "  Tax Efficiency:      " << std::setprecision(2)
                   << result.taxEfficiency << "%" << std::endl;
     }
+
+
 
     std::cout << std::endl;
 }

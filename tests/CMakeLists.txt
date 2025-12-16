@@ -14,15 +14,6 @@ portfolio_add_test(
 )
 
 # ----------------------------------------------------------------------------
-# CSV DataSource Tests
-# ----------------------------------------------------------------------------
-
-portfolio_add_test(
-    NAME csv_datasource
-    SOURCES test_csv_datasource.cpp
-)
-
-# ----------------------------------------------------------------------------
 # Portfolio Tests
 # ----------------------------------------------------------------------------
 
@@ -74,6 +65,7 @@ portfolio_add_test(
     SOURCES test_inflation_adjuster.cpp
     LIBRARIES inmemory_db_impl
 )
+
 
 
 #TODO: добавить тест для проверки RiskFreeRateCalculator

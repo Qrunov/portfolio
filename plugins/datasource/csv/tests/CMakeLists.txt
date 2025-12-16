@@ -11,6 +11,17 @@ portfolio_add_test(
     LIBRARIES csv_datasource_impl
 )
 
+# ----------------------------------------------------------------------------
+# CSV DataSource Tests
+# ----------------------------------------------------------------------------
+
+portfolio_add_test(
+    NAME csv_datasource
+    SOURCES test_csv_datasource.cpp
+)
+
+
+
 # Добавляем зависимость от плагина, чтобы он был собран перед тестами
 add_dependencies(test_csv_datasource_plugin csv_plugin)
 

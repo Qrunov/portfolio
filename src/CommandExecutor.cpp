@@ -1833,19 +1833,20 @@ std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedComman
                                      ". Expected 'column:attribute'");
             }
 
-            std::string columnStr = mapping.substr(0, pos);
-            std::string attrName = mapping.substr(pos + 1);
+            std::string attrName = mapping.substr(0, pos);      // До ':'
+            std::string columnStr = mapping.substr(pos + 1);    // После ':'
 
             // Конвертируем column с 1-based на 0-based
             std::size_t columnNum;
             try {
                 columnNum = std::stoull(columnStr);
                 if (columnNum == 0) {
-                    return std::unexpected("Column index must be >= 1: " + mapping);
+                    return std::unexpected("Column index must be >= 1 in mapping: " + mapping);
                 }
                 columnNum--; // Convert to 0-based
             } catch (...) {
-                return std::unexpected("Invalid column number in mapping: " + mapping);
+                return std::unexpected("Invalid column number in mapping '" + mapping +
+                                       "'. Expected format: attribute:column (e.g., close:6)");
             }
 
             auto addResult = dataSource->addAttributeRequest(

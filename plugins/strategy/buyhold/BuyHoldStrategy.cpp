@@ -18,10 +18,6 @@ std::expected<void, std::string> BuyHoldStrategy::initializeStrategy(
     return {};
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ✅ УЛУЧШЕННАЯ ПРОДАЖА (TODO #24, #25, #26, #27, #28, #29)
-// ═══════════════════════════════════════════════════════════════════════════════
-
 std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     const std::string& instrumentId,
     TradingContext& context,
@@ -40,10 +36,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
 
     double currentShares = context.holdings[instrumentId];
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ✅ TODO #24, #25, #27, #28: Улучшенное получение цены
-    // ════════════════════════════════════════════════════════════════════════
-
     double price = 0.0;
     bool useLastKnownPrice = false;
 
@@ -53,7 +45,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     if (priceResult) {
         price = *priceResult;
     } else {
-        // ✅ TODO #24, #25: Если нет цены - берем последнюю известную
         auto lastPriceResult = getLastAvailablePrice(
             instrumentId, context.currentDate, context);
 
@@ -73,12 +64,10 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     std::size_t sharesToSell = 0;
     std::string reason;
 
-    // ✅ TODO #24: Случай 1 - Последний день бэктеста
     if (context.isLastDay) {
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
         reason = "end of backtest";
     }
-    // ✅ TODO #25, #26, #28: Случай 2 - Делистинг
     else if (isDelisted(instrumentId, context.currentDate, context)) {
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
         reason = "delisting";
@@ -140,14 +129,10 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
 
     double totalAmount = sharesToSell * price;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ✅ TODO #29: Налоговый расчет через TaxCalculator
-    // ════════════════════════════════════════════════════════════════════════
 
     if (taxCalculator_ && context.taxLots.count(instrumentId)) {
         auto& lots = context.taxLots[instrumentId];
 
-        // ✅ TODO #29: Используем taxCalculator_->recordSale()
         auto taxResult = taxCalculator_->recordSale(
             instrumentId,
             static_cast<double>(sharesToSell),
@@ -358,8 +343,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     if (shares == 0) {
         return result;
     }
-
-    // ✅ НЕ обновляем holdings здесь - это делает deployCapital()
 
     // Создаем налоговый лот если нужно
     if (taxCalculator_) {

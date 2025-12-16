@@ -104,12 +104,9 @@ BasePortfolioStrategy::backtest(
     std::size_t dividendPaymentsCount = 0;
     totalTaxesPaidDuringBacktest_ = 0.0;
 
-    std::cout << "REBALANCE PERIOD: "
-              << params.getParameter("rebalance_period", "0") << std::endl;
 
     for (std::size_t i = 0; i < sortedTradingDays.size(); ++i) {
         TradingDayInfo dayInfo;
-        // ✅ КРИТИЧЕСКИ ВАЖНО: Нормализуем дату до 00:00:00
         dayInfo.currentDate = normalizeToDate(sortedTradingDays[i]);
         dayInfo.year = getYear(dayInfo.currentDate);
 
@@ -129,7 +126,6 @@ BasePortfolioStrategy::backtest(
 
         dayInfo.isLastDayOfBacktest = context.isLastDay;
 
-        // ✅ TODO #18: Определяем последний торговый день года
         if (i + 1 < sortedTradingDays.size()) {
             TimePoint nextTradingDate = normalizeToDate(sortedTradingDays[i + 1]);
             dayInfo.isLastDayOfYear = isLastTradingDayOfYear(
@@ -146,7 +142,6 @@ BasePortfolioStrategy::backtest(
             return std::unexpected(result.error());
         }
 
-        // ✅ TODO #18, #19, #20: Обработка налогов на конец года
         if (taxCalculator_ && (dayInfo.isLastDayOfYear || dayInfo.isLastDayOfBacktest)) {
             if (auto result = processYearEndTaxes(context, params, dayInfo);
                 !result) {
@@ -308,7 +303,6 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
         auto buyResult = buy(instrumentId, context, params);
 
         if (buyResult && buyResult->sharesTraded > 0) {
-            // ✅ КРИТИЧЕСКИ ВАЖНО: Добавляем купленные акции в holdings
             context.holdings[instrumentId] += buyResult->sharesTraded;
 
             context.cashBalance -= buyResult->totalAmount;
@@ -334,10 +328,6 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
     return {};
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ✅ TODO #21, #22, #23: УЛУЧШЕННАЯ ОБРАБОТКА ДИВИДЕНДОВ
-// ═══════════════════════════════════════════════════════════════════════════════
-
 std::expected<double, std::string> BasePortfolioStrategy::getDividend(
     const std::string& instrumentId,
     TradingContext& context,
@@ -357,14 +347,12 @@ std::expected<double, std::string> BasePortfolioStrategy::getDividend(
 
     const auto& dividends = context.dividendData[instrumentId];
 
-    // ✅ TODO #21, #22: Ищем дивиденды в диапазоне (previousDate, currentDate]
     for (const auto& dividend : dividends) {
         if (dividend.date > previousTradingDate &&
             dividend.date <= context.currentDate) {
 
             double grossDividend = dividend.amount * shares;
 
-            // ✅ TODO #23: Вычитаем налог с дивиденда
             double netDividend = grossDividend;
             if (taxCalculator_) {
                 netDividend = taxCalculator_->recordDividend(grossDividend);
@@ -392,10 +380,6 @@ std::expected<double, std::string> BasePortfolioStrategy::getDividend(
 
     return totalDividend;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ✅ TODO #18, #19, #20: ОБРАБОТКА НАЛОГОВ НА КОНЕЦ ГОДА
-// ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<void, std::string> BasePortfolioStrategy::processYearEndTaxes(
     TradingContext& context,
@@ -427,7 +411,6 @@ std::expected<void, std::string> BasePortfolioStrategy::processYearEndTaxes(
         return {};
     }
 
-    // ✅ TODO #19: Пытаемся уплатить налог из кэша
     auto paymentResult = taxCalculator_->payYearEndTax(
         context.cashBalance, taxSummary);
 
@@ -449,7 +432,6 @@ std::expected<void, std::string> BasePortfolioStrategy::processYearEndTaxes(
     std::cout << "   Tax paid: ₽" << taxPaid << std::endl;
     std::cout << "   Remaining cash: ₽" << context.cashBalance << std::endl;
 
-    // ✅ TODO #19: Если кэша недостаточно - проводим ребалансировку
     double shortfall = taxSummary.totalTax - taxPaid;
     if (shortfall > 0.01) {
         std::cout << "   💡 Need to rebalance for tax payment: ₽"
@@ -461,7 +443,6 @@ std::expected<void, std::string> BasePortfolioStrategy::processYearEndTaxes(
         } else {
             double cashRaised = *rebalanceResult;
 
-            // ✅ КРИТИЧНО: Вычитаем собранные деньги из кэша (они идут на налоги)
             context.cashBalance -= cashRaised;
             totalTaxesPaidDuringBacktest_ += cashRaised;
 
@@ -563,10 +544,6 @@ std::expected<double, std::string> BasePortfolioStrategy::rebalanceForTaxPayment
     return cashRaised;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ✅ TODO #24, #25, #26, #27, #28: УЛУЧШЕННОЕ ОПРЕДЕЛЕНИЕ ДЕЛИСТИНГА
-// ═══════════════════════════════════════════════════════════════════════════════
-
 InstrumentPriceInfo BasePortfolioStrategy::getInstrumentPriceInfo(
     const std::string& instrumentId,
     const TradingContext& context) const
@@ -584,7 +561,6 @@ InstrumentPriceInfo BasePortfolioStrategy::getInstrumentPriceInfo(
 
     info.hasData = true;
 
-    // ✅ TODO #27: map отсортирован - используем begin()/rbegin()
     info.firstAvailableDate = prices.begin()->first;
     info.lastAvailableDate = prices.rbegin()->first;
     info.lastKnownPrice = prices.rbegin()->second;
@@ -603,7 +579,6 @@ bool BasePortfolioStrategy::isDelisted(
         return false;
     }
 
-    // ✅ TODO #26, #28: Правильное условие делистинга
     return currentDate > priceInfo.lastAvailableDate;
 }
 

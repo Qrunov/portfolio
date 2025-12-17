@@ -87,11 +87,11 @@ public:
     // ШАБЛОННЫЙ МЕТОД BACKTEST
     // ════════════════════════════════════════════════════════════════════════
 
-    std::expected<BacktestResult, std::string> backtest(
+    virtual std::expected<BacktestResult, std::string> backtest(
         const PortfolioParams& params,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        double initialCapital) override final;
+        double initialCapital) override;
 
 protected:
     // ════════════════════════════════════════════════════════════════════════
@@ -103,6 +103,46 @@ protected:
         const PortfolioParams& /* params */) {
         return {};
     }
+
+    virtual std::expected<void, std::string> validateInputParameters(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
+
+    virtual void printBacktestHeader(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
+
+    virtual std::expected<void, std::string> processTradingDay(
+        TradingContext& context,
+        const PortfolioParams& params,
+        const TradingDayInfo& dayInfo,
+        std::vector<double>& dailyValues,
+        double& totalDividendsReceived,
+        std::size_t& dividendPaymentsCount);
+
+    virtual std::expected<void, std::string> collectCash(
+        TradingContext& context,
+        const PortfolioParams& params,
+        const TradingDayInfo& dayInfo,
+        double& totalDividendsReceived,
+        std::size_t& dividendPaymentsCount);
+
+    virtual std::expected<void, std::string> deployCapital(
+        TradingContext& context,
+        const PortfolioParams& params);
+
+    virtual BacktestResult calculateFinalResults(
+        const std::vector<double>& dailyValues,
+        double initialCapital,
+        double totalDividendsReceived,
+        std::size_t dividendPaymentsCount,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        const PortfolioParams& params) const;
 
     virtual std::expected<TradeResult, std::string> sell(
         const std::string& instrumentId,
@@ -181,13 +221,6 @@ private:
     // ════════════════════════════════════════════════════════════════════════
     // Приватные методы
     // ════════════════════════════════════════════════════════════════════════
-
-    std::expected<void, std::string> validateInputParameters(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) const;
-
     std::expected<void, std::string> initializeTradingCalendar(
         const PortfolioParams& params,
         const TimePoint& startDate,
@@ -198,30 +231,6 @@ private:
         const TimePoint& startDate,
         const TimePoint& endDate);
 
-    void printBacktestHeader(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) const;
-
-    std::expected<void, std::string> processTradingDay(
-        TradingContext& context,
-        const PortfolioParams& params,
-        const TradingDayInfo& dayInfo,
-        std::vector<double>& dailyValues,
-        double& totalDividendsReceived,
-        std::size_t& dividendPaymentsCount);
-
-    std::expected<void, std::string> collectCash(
-        TradingContext& context,
-        const PortfolioParams& params,
-        const TradingDayInfo& dayInfo,
-        double& totalDividendsReceived,
-        std::size_t& dividendPaymentsCount);
-
-    std::expected<void, std::string> deployCapital(
-        TradingContext& context,
-        const PortfolioParams& params);
 
     // ✅ TODO #18, #19, #20: Обработка налогов на конец года
     std::expected<void, std::string> processYearEndTaxes(
@@ -233,15 +242,6 @@ private:
         TradingContext& context,
         const PortfolioParams& params,
         double taxOwed);
-
-    BacktestResult calculateFinalResults(
-        const std::vector<double>& dailyValues,
-        double initialCapital,
-        double totalDividendsReceived,
-        std::size_t dividendPaymentsCount,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        const PortfolioParams& params) const;
 
     void printFinalSummary(const BacktestResult& result) const;
 

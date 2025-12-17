@@ -85,39 +85,9 @@ private:
 
     // Strategy helpers
     std::expected<TimePoint, std::string> parseDateString(std::string_view dateStr) const;
-    void printBacktestResults(const IPortfolioStrategy::BacktestResult& result) const;
-    void printTaxResults(const IPortfolioStrategy::BacktestResult& result) const;
 
     std::expected<void, std::string> executeDatabaseList(const ParsedCommand& cmd);
     std::expected<void, std::string> executeStrategyListUpdated(const ParsedCommand& cmd);
-
-
-    // Метод для валидации известных параметров (опционально)
-    std::expected<void, std::string> validateStrategyParameters(
-        const std::map<std::string, std::string>& parameters) const
-    {
-        // Список известных параметров (можно расширять)
-        static const std::set<std::string> knownParams = {
-            "calendar",
-            "inflation",
-            // Будущие параметры:
-            // "rebalance",
-            // "risk_model",
-            // "stop_loss",
-            // "take_profit"
-        };
-
-        // Проверяем неизвестные параметры (warning, не ошибка)
-        for (const auto& [key, value] : parameters) {
-            if (knownParams.find(key) == knownParams.end()) {
-                std::cout << "⚠ Warning: Unknown parameter '" << key
-                          << "' (this may be strategy-specific)" << std::endl;
-            }
-        }
-
-        return {};
-    }
-    void printBacktestResult(const IPortfolioStrategy::BacktestResult& result) const;
 
 };
 

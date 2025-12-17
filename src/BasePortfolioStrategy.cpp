@@ -121,9 +121,8 @@ BasePortfolioStrategy::backtest(
         context.currentDate = dayInfo.currentDate;
         context.dayIndex = i;
         context.isRebalanceDay = isRebalanceDay(
-            i, std::stoi(params.getParameter("rebalance_period", "0")));
+            i, static_cast<std::size_t>(std::stoi(params.getParameter("rebalance_period", "0"))));
         context.isLastDay = (i == sortedTradingDays.size() - 1);
-
         dayInfo.isLastDayOfBacktest = context.isLastDay;
 
         if (i + 1 < sortedTradingDays.size()) {
@@ -500,7 +499,7 @@ std::expected<double, std::string> BasePortfolioStrategy::rebalanceForTaxPayment
             continue;
         }
 
-        double weight = 1.0 / params.instrumentIds.size();
+        double weight = 1.0 / static_cast<double>(params.instrumentIds.size());
         if (params.weights.count(instrumentId)) {
             weight = params.weights.at(instrumentId);
         }
@@ -584,7 +583,7 @@ bool BasePortfolioStrategy::isDelisted(
 
 std::expected<double, std::string> BasePortfolioStrategy::getLastAvailablePrice(
     const std::string& instrumentId,
-    const TimePoint& currentDate,
+    const TimePoint& /* currentDate */,
     const TradingContext& context) const
 {
     auto priceInfo = getInstrumentPriceInfo(instrumentId, context);
@@ -876,157 +875,187 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
     std::size_t dividendPaymentsCount,
     const TimePoint& startDate,
     const TimePoint& endDate,
-    const PortfolioParams& params) const
+    const PortfolioParams& /* params */) const
 {
     BacktestResult result;
 
-    result.finalValue = dailyValues.back();
+    // ════════════════════════════════════════════════════════════════════════
+    // ОБЩИЕ МЕТРИКИ (GENERAL)
+    // ════════════════════════════════════════════════════════════════════════
 
+    double finalValue = dailyValues.back();
     auto totalDuration = std::chrono::duration_cast<std::chrono::hours>(
         endDate - startDate);
-    result.tradingDays = totalDuration.count() / 24;
+    std::int64_t tradingDays = totalDuration.count() / 24;
 
-    result.totalReturn = ((result.finalValue - initialCapital) / initialCapital) * 100.0;
+    double totalReturn = ((finalValue - initialCapital) / initialCapital) * 100.0;
+    double priceReturn = ((finalValue - totalDividendsReceived - initialCapital) /
+                          initialCapital) * 100.0;
+    double dividendReturn = totalReturn - priceReturn;
 
-    double yearsElapsed = static_cast<double>(result.tradingDays) / 365.25;
+    double yearsElapsed = static_cast<double>(tradingDays) / 365.25;
+    double annualizedReturn = 0.0;
     if (yearsElapsed > 0) {
-        result.annualizedReturn = (std::pow(
-                                       result.finalValue / initialCapital, 1.0 / yearsElapsed) - 1.0) * 100.0;
+        annualizedReturn = (std::pow(finalValue / initialCapital,
+                                     1.0 / yearsElapsed) - 1.0) * 100.0;
     }
 
-    // Дивиденды
-    result.totalDividends = totalDividendsReceived;
-    result.dividendPayments = dividendPaymentsCount;
+    result.setMetric(ResultCategory::GENERAL, MetricKey::FINAL_VALUE, finalValue);
+    result.setMetric(ResultCategory::GENERAL, MetricKey::TRADING_DAYS, tradingDays);
+    result.setMetric(ResultCategory::GENERAL, MetricKey::TOTAL_RETURN, totalReturn);
+    result.setMetric(ResultCategory::GENERAL, MetricKey::PRICE_RETURN, priceReturn);
+    result.setMetric(ResultCategory::GENERAL, MetricKey::DIVIDEND_RETURN, dividendReturn);
+    result.setMetric(ResultCategory::GENERAL, MetricKey::ANNUALIZED_RETURN, annualizedReturn);
 
-    if (initialCapital > 0) {
-        result.dividendYield = (totalDividendsReceived / initialCapital) * 100.0;
-    }
+    // ════════════════════════════════════════════════════════════════════════
+    // МЕТРИКИ РИСКА (RISK)
+    // ════════════════════════════════════════════════════════════════════════
 
-    // Волатильность
+    double volatility = 0.0;
+    double maxDrawdown = 0.0;
+    double sharpeRatio = 0.0;
+
     if (dailyValues.size() > 1) {
+        // Расчет волатильности
         std::vector<double> returns;
+        returns.reserve(dailyValues.size() - 1);
         for (std::size_t i = 1; i < dailyValues.size(); ++i) {
-            if (dailyValues[i - 1] > 0) {
-                double dailyReturn = (dailyValues[i] - dailyValues[i - 1]) /
-                                     dailyValues[i - 1];
-                returns.push_back(dailyReturn);
+            double dailyReturn = (dailyValues[i] - dailyValues[i - 1]) / dailyValues[i - 1];
+            returns.push_back(dailyReturn);
+        }
+
+        double meanReturn = 0.0;
+        for (double ret : returns) {
+            meanReturn += ret;
+        }
+        meanReturn /= static_cast<double>(returns.size());
+
+        double variance = 0.0;
+        for (double ret : returns) {
+            double diff = ret - meanReturn;
+            variance += diff * diff;
+        }
+        variance /= static_cast<double>(returns.size());
+
+        double dailyVolatility = std::sqrt(variance);
+        volatility = dailyVolatility * std::sqrt(252.0) * 100.0;
+
+        // Расчет максимальной просадки
+        double peak = dailyValues[0];
+        for (double value : dailyValues) {
+            if (value > peak) {
+                peak = value;
+            }
+            double drawdown = ((peak - value) / peak) * 100.0;
+            if (drawdown > maxDrawdown) {
+                maxDrawdown = drawdown;
             }
         }
 
-        if (!returns.empty()) {
-            double meanReturn = std::accumulate(returns.begin(), returns.end(), 0.0) /
-                                returns.size();
-            double variance = 0.0;
-            for (double r : returns) {
-                variance += (r - meanReturn) * (r - meanReturn);
-            }
-            variance /= returns.size();
-            result.volatility = std::sqrt(variance * 252) * 100.0;
+        // Расчет Sharpe Ratio (упрощенная версия, безрисковая ставка = 0)
+        if (volatility > 0) {
+            sharpeRatio = annualizedReturn / volatility;
         }
     }
 
+    result.setMetric(ResultCategory::RISK, MetricKey::VOLATILITY, volatility);
+    result.setMetric(ResultCategory::RISK, MetricKey::MAX_DRAWDOWN, maxDrawdown);
+    result.setMetric(ResultCategory::RISK, MetricKey::SHARPE_RATIO, sharpeRatio);
 
-    // Max drawdown - пропускаем нули и отрицательные значения
-    double peak = 0.0;
-    bool peakInitialized = false;
+    // ════════════════════════════════════════════════════════════════════════
+    // ДИВИДЕНДЫ (DIVIDENDS)
+    // ════════════════════════════════════════════════════════════════════════
 
-    for (double value : dailyValues) {
-        // Пропускаем нули и отрицательные значения
-        if (value <= 0.0) {
-            continue;
-        }
-
-        // Инициализируем пик первым положительным значением
-        if (!peakInitialized) {
-            peak = value;
-            peakInitialized = true;
-            continue;
-        }
-
-        // Обновляем пик
-        if (value > peak) {
-            peak = value;
-        }
-
-        // Рассчитываем drawdown
-        double drawdown = ((peak - value) / peak) * 100.0;
-        if (drawdown > result.maxDrawdown) {
-            result.maxDrawdown = drawdown;
-        }
+    double dividendYield = 0.0;
+    if (initialCapital > 0) {
+        dividendYield = (totalDividendsReceived / initialCapital) * 100.0;
     }
 
+    result.setMetric(ResultCategory::DIVIDENDS, MetricKey::TOTAL_DIVIDENDS, totalDividendsReceived);
+    result.setMetric(ResultCategory::DIVIDENDS, MetricKey::DIVIDEND_YIELD, dividendYield);
+    result.setMetric(ResultCategory::DIVIDENDS, MetricKey::DIVIDEND_PAYMENTS,
+                     static_cast<std::int64_t>(dividendPaymentsCount));
 
+    // ════════════════════════════════════════════════════════════════════════
+    // НАЛОГИ (TAX)
+    // ════════════════════════════════════════════════════════════════════════
 
-
-    std::cout << std::endl;
-
-
-
-    // Sharpe Ratio
-    if (result.volatility > 0) {
-        double riskFreeRate = 7.0;
-        if (params.hasParameter("risk_free_rate")) {
-            riskFreeRate = std::stod(params.getParameter("risk_free_rate"));
-        }
-        result.sharpeRatio = (result.annualizedReturn - riskFreeRate) / result.volatility;
-    }
-
-    // Налоги
     if (taxCalculator_) {
-        auto taxSummary = taxCalculator_->finalize();
-        result.totalTaxesPaid = totalTaxesPaidDuringBacktest_;
-        result.taxSummary = taxSummary;
+        TaxSummary taxSummary = taxCalculator_->finalize();
 
-        if (initialCapital > 0) {
-            // finalValue УЖЕ учитывает уплаченные налоги (они были вычтены во время бэктеста)
-            result.afterTaxFinalValue = result.finalValue;
-            result.afterTaxReturn = result.totalReturn;
+        double totalTaxesPaid = totalTaxesPaidDuringBacktest_;
+        double afterTaxFinalValue = finalValue;
+        double afterTaxReturn = totalReturn;
 
-            // Рассчитываем гипотетическую доходность БЕЗ налогов
-            // (если бы налоги не платили, а все средства остались в портфеле)
-            double preTaxFinalValue = result.finalValue + result.totalTaxesPaid;
-            double preTaxReturn = ((preTaxFinalValue - initialCapital) /
-                                   initialCapital) * 100.0;
+        // Рассчитываем гипотетическую доходность БЕЗ налогов
+        double preTaxFinalValue = finalValue + totalTaxesPaid;
+        double preTaxReturn = ((preTaxFinalValue - initialCapital) / initialCapital) * 100.0;
 
-            // Tax efficiency = сколько % доходности осталось после налогов
-            if (preTaxReturn > 0) {
-                result.taxEfficiency = (result.totalReturn / preTaxReturn) * 100.0;
-            } else {
-                result.taxEfficiency = 100.0;
-            }
+        // Tax efficiency = сколько % доходности осталось после налогов
+        double taxEfficiency = 100.0;
+        if (preTaxReturn > 0) {
+            taxEfficiency = (totalReturn / preTaxReturn) * 100.0;
         }
+
+        result.setMetric(ResultCategory::TAX, MetricKey::TOTAL_TAXES_PAID, totalTaxesPaid);
+        result.setMetric(ResultCategory::TAX, MetricKey::AFTER_TAX_RETURN, afterTaxReturn);
+        result.setMetric(ResultCategory::TAX, MetricKey::AFTER_TAX_FINAL_VALUE, afterTaxFinalValue);
+        result.setMetric(ResultCategory::TAX, MetricKey::TAX_EFFICIENCY, taxEfficiency);
+        result.setMetric(ResultCategory::TAX, MetricKey::TAX_SUMMARY, taxSummary);
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // ИНФЛЯЦИЯ (INFLATION)
+    // ════════════════════════════════════════════════════════════════════════
 
-
-
-    // Инфляция
     if (inflationAdjuster_ && inflationAdjuster_->hasData()) {
-        result.hasInflationData = true;
-
-        result.cumulativeInflation = inflationAdjuster_->getCumulativeInflation(
+        double cumulativeInflation = inflationAdjuster_->getCumulativeInflation(
             startDate, endDate);
 
-        double inflationFactor = 1.0 + (result.cumulativeInflation / 100.0);
-        result.realFinalValue = result.finalValue / inflationFactor;
+        double inflationFactor = 1.0 + (cumulativeInflation / 100.0);
+        double realFinalValue = finalValue / inflationFactor;
 
-        result.realTotalReturn = ((result.realFinalValue - initialCapital) /
-                                  initialCapital) * 100.0;
+        double realTotalReturn = ((realFinalValue - initialCapital) / initialCapital) * 100.0;
 
+        double realAnnualizedReturn = 0.0;
         if (yearsElapsed > 0) {
-            result.realAnnualizedReturn = (std::pow(
-                                               result.realFinalValue / initialCapital, 1.0 / yearsElapsed) - 1.0) * 100.0;
+            realAnnualizedReturn = (std::pow(
+                                        realFinalValue / initialCapital, 1.0 / yearsElapsed) - 1.0) * 100.0;
+        }
+
+        result.setMetric(ResultCategory::INFLATION, MetricKey::HAS_INFLATION_DATA, true);
+        result.setMetric(ResultCategory::INFLATION, MetricKey::CUMULATIVE_INFLATION, cumulativeInflation);
+        result.setMetric(ResultCategory::INFLATION, MetricKey::REAL_TOTAL_RETURN, realTotalReturn);
+        result.setMetric(ResultCategory::INFLATION, MetricKey::REAL_ANNUALIZED_RETURN, realAnnualizedReturn);
+        result.setMetric(ResultCategory::INFLATION, MetricKey::REAL_FINAL_VALUE, realFinalValue);
+    } else {
+        result.setMetric(ResultCategory::INFLATION, MetricKey::HAS_INFLATION_DATA, false);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // КОРРЕКТИРОВКИ ДАТ (ADJUSTMENTS)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (calendar_) {
+        auto adjustments = calendar_->getAdjustmentLog();
+        if (!adjustments.empty()) {
+            result.setMetric(ResultCategory::ADJUSTMENTS, MetricKey::DATE_ADJUSTMENTS, adjustments);
         }
     }
 
     return result;
 }
 
+
 void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) const
 {
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "BACKTEST RESULTS" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Информация о торговом календаре
+    // ════════════════════════════════════════════════════════════════════════
 
     if (calendar_) {
         std::cout << "\nTrading Calendar:" << std::endl;
@@ -1038,69 +1067,186 @@ void BasePortfolioStrategy::printFinalSummary(const BacktestResult& result) cons
         std::cout << "  Trading days: " << calendar_->getTradingDaysCount() << std::endl;
     }
 
-    std::cout << "\nPerformance Metrics:" << std::endl;
-    std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
-    std::cout << "  Final Value:         ₽" << std::fixed << std::setprecision(2)
-              << result.finalValue << std::endl;
-    std::cout << "  Total Return:        " << std::setprecision(2)
-              << result.totalReturn << "%" << std::endl;
-    std::cout << "  Annualized Return:   " << std::setprecision(2)
-              << result.annualizedReturn << "%" << std::endl;
+    // ════════════════════════════════════════════════════════════════════════
+    // ОБЩИЕ МЕТРИКИ (GENERAL)
+    // ════════════════════════════════════════════════════════════════════════
 
-    if (result.hasInflationData) {
+    if (result.hasCategory(ResultCategory::GENERAL)) {
+        std::cout << "\nPerformance Metrics:" << std::endl;
+        std::cout << "  Trading Days:        " << result.tradingDays() << std::endl;
+        std::cout << "  Final Value:         ₽" << std::fixed << std::setprecision(2)
+                  << result.finalValue() << std::endl;
+        std::cout << "  Total Return:        " << std::setprecision(2)
+                  << result.totalReturn() << "%" << std::endl;
+        std::cout << "  Annualized Return:   " << std::setprecision(2)
+                  << result.annualizedReturn() << "%" << std::endl;
+
+        // Дополнительно: price return и dividend return
+        if (result.hasMetric(ResultCategory::GENERAL, MetricKey::PRICE_RETURN)) {
+            std::cout << "  Price Return:        " << std::setprecision(2)
+            << result.getDouble(ResultCategory::GENERAL, MetricKey::PRICE_RETURN)
+            << "%" << std::endl;
+        }
+        if (result.hasMetric(ResultCategory::GENERAL, MetricKey::DIVIDEND_RETURN)) {
+            std::cout << "  Dividend Return:     " << std::setprecision(2)
+            << result.getDouble(ResultCategory::GENERAL, MetricKey::DIVIDEND_RETURN)
+            << "%" << std::endl;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // МЕТРИКИ РИСКА (RISK)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.hasCategory(ResultCategory::RISK)) {
+        std::cout << "\nRisk Metrics:" << std::endl;
+        std::cout << "  Volatility:          " << std::setprecision(2)
+                  << result.volatility() << "%" << std::endl;
+        std::cout << "  Max Drawdown:        " << std::setprecision(2)
+                  << result.maxDrawdown() << "%" << std::endl;
+        std::cout << "  Sharpe Ratio:        " << std::setprecision(3)
+                  << result.sharpeRatio() << std::endl;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ДИВИДЕНДЫ (DIVIDENDS)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.hasCategory(ResultCategory::DIVIDENDS)) {
+        double totalDividends = result.totalDividends();
+        std::int64_t dividendPayments = result.getInt64(
+            ResultCategory::DIVIDENDS, MetricKey::DIVIDEND_PAYMENTS);
+
+        if (totalDividends > 0.01) {
+            std::cout << "\nDividend Income:" << std::endl;
+            std::cout << "  Total Dividends:     ₽" << std::setprecision(2)
+                      << totalDividends << std::endl;
+            std::cout << "  Dividend Payments:   " << dividendPayments << std::endl;
+
+            if (result.hasMetric(ResultCategory::DIVIDENDS, MetricKey::DIVIDEND_YIELD)) {
+                std::cout << "  Dividend Yield:      " << std::setprecision(2)
+                << result.getDouble(ResultCategory::DIVIDENDS, MetricKey::DIVIDEND_YIELD)
+                << "%" << std::endl;
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // НАЛОГИ (TAX)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.hasCategory(ResultCategory::TAX)) {
+        double totalTaxesPaid = result.getDouble(ResultCategory::TAX, MetricKey::TOTAL_TAXES_PAID);
+
+        if (totalTaxesPaid > 0.01) {
+            std::cout << "\nTax Information:" << std::endl;
+            std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
+                      << totalTaxesPaid << std::endl;
+            std::cout << "  After-Tax Return:    " << std::setprecision(2)
+                      << result.getDouble(ResultCategory::TAX, MetricKey::AFTER_TAX_RETURN)
+                      << "%" << std::endl;
+            std::cout << "  After-Tax Value:     ₽" << std::setprecision(2)
+                      << result.getDouble(ResultCategory::TAX, MetricKey::AFTER_TAX_FINAL_VALUE)
+                      << std::endl;
+            std::cout << "  Tax Efficiency:      " << std::setprecision(2)
+                      << result.getDouble(ResultCategory::TAX, MetricKey::TAX_EFFICIENCY)
+                      << "%" << std::endl;
+
+            // Детальная налоговая информация
+            if (auto taxSummary = result.getTaxSummary(); taxSummary) {
+                std::cout << "\n  Tax Breakdown:" << std::endl;
+                std::cout << "    Capital Gains Tax: ₽" << std::setprecision(2)
+                          << taxSummary->capitalGainsTax << std::endl;
+                std::cout << "    Dividend Tax:      ₽" << std::setprecision(2)
+                          << taxSummary->dividendTax << std::endl;
+
+                if (taxSummary->exemptTransactions > 0) {
+                    std::cout << "    Tax-Exempt Transactions: "
+                              << taxSummary->exemptTransactions << std::endl;
+                }
+
+                if (taxSummary->carryforwardLoss > 0.01) {
+                    std::cout << "    Loss Carryforward: ₽" << std::setprecision(2)
+                              << taxSummary->carryforwardLoss << std::endl;
+                }
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ИНФЛЯЦИЯ (INFLATION)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.hasInflationData()) {
         std::cout << "\nInflation-Adjusted Metrics:" << std::endl;
-        std::cout << "  Cumulative Inflation:" << std::setprecision(2)
-                  << result.cumulativeInflation << "%" << std::endl;
-        std::cout << "  Real Final Value:    ₽" << std::fixed << std::setprecision(2)
-                  << result.realFinalValue << std::endl;
-        std::cout << "  Real Total Return:   " << std::setprecision(2)
-                  << result.realTotalReturn << "%" << std::endl;
-        std::cout << "  Real Annual Return:  " << std::setprecision(2)
-                  << result.realAnnualizedReturn << "%" << std::endl;
+        std::cout << "  Cumulative Inflation: " << std::setprecision(2)
+                  << result.getDouble(ResultCategory::INFLATION, MetricKey::CUMULATIVE_INFLATION)
+                  << "%" << std::endl;
+        std::cout << "  Real Total Return:    " << std::setprecision(2)
+                  << result.getDouble(ResultCategory::INFLATION, MetricKey::REAL_TOTAL_RETURN)
+                  << "%" << std::endl;
+        std::cout << "  Real Annualized:      " << std::setprecision(2)
+                  << result.getDouble(ResultCategory::INFLATION, MetricKey::REAL_ANNUALIZED_RETURN)
+                  << "%" << std::endl;
+        std::cout << "  Real Final Value:     ₽" << std::setprecision(2)
+                  << result.getDouble(ResultCategory::INFLATION, MetricKey::REAL_FINAL_VALUE)
+                  << std::endl;
     }
 
-    std::cout << "\nRisk Metrics:" << std::endl;
-    std::cout << "  Volatility:          " << std::setprecision(2)
-              << result.volatility << "%" << std::endl;
-    std::cout << "  Max Drawdown:        " << std::setprecision(2)
-              << result.maxDrawdown << "%" << std::endl;
-    std::cout << "  Sharpe Ratio:        " << std::setprecision(2)
-              << result.sharpeRatio << std::endl;
+    // ════════════════════════════════════════════════════════════════════════
+    // БЕНЧМАРК (BENCHMARK) - если есть
+    // ════════════════════════════════════════════════════════════════════════
 
-    if (result.totalDividends > 0) {
-        std::cout << "\nDividend Metrics:" << std::endl;
-        std::cout << "  Total Dividends:     ₽" << std::fixed << std::setprecision(2)
-                  << result.totalDividends << std::endl;
-        std::cout << "  Dividend Yield:      " << std::setprecision(2)
-                  << result.dividendYield << "%" << std::endl;
-        std::cout << "  Payments Count:      " << result.dividendPayments << std::endl;
+    if (result.hasCategory(ResultCategory::BENCHMARK)) {
+        std::string benchmarkId = result.getString(
+            ResultCategory::BENCHMARK, MetricKey::BENCHMARK_ID);
+
+        if (!benchmarkId.empty()) {
+            std::cout << "\nBenchmark Comparison (" << benchmarkId << "):" << std::endl;
+            std::cout << "  Benchmark Return:    " << std::setprecision(2)
+                      << result.getDouble(ResultCategory::BENCHMARK, MetricKey::BENCHMARK_RETURN)
+                      << "%" << std::endl;
+            std::cout << "  Alpha:               " << std::setprecision(2)
+                      << result.getDouble(ResultCategory::BENCHMARK, MetricKey::ALPHA)
+                      << "%" << std::endl;
+            std::cout << "  Beta:                " << std::setprecision(3)
+                      << result.getDouble(ResultCategory::BENCHMARK, MetricKey::BETA)
+                      << std::endl;
+            std::cout << "  Correlation:         " << std::setprecision(3)
+                      << result.getDouble(ResultCategory::BENCHMARK, MetricKey::CORRELATION)
+                      << std::endl;
+            std::cout << "  Tracking Error:      " << std::setprecision(2)
+                      << result.getDouble(ResultCategory::BENCHMARK, MetricKey::TRACKING_ERROR)
+                      << "%" << std::endl;
+            std::cout << "  Information Ratio:   " << std::setprecision(3)
+                      << result.getDouble(ResultCategory::BENCHMARK, MetricKey::INFORMATION_RATIO)
+                      << std::endl;
+        }
     }
 
-    if (result.totalTaxesPaid > 0) {
-        std::cout << "\nTax Metrics:" << std::endl;
-        std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
-                  << result.totalTaxesPaid << std::endl;
+    // ════════════════════════════════════════════════════════════════════════
+    // КОРРЕКТИРОВКИ ДАТ (ADJUSTMENTS) - если есть
+    // ════════════════════════════════════════════════════════════════════════
 
-        double preTaxFinalValue = result.finalValue + result.totalTaxesPaid;
-        double preTaxReturn = 0.0;
-        if (result.finalValue > 0) {
-            // Находим initial capital (обратно из total return)
-            double initialCapital = result.finalValue / (1.0 + result.totalReturn / 100.0);
-            preTaxReturn = ((preTaxFinalValue - initialCapital) / initialCapital) * 100.0;
+    if (auto adjustments = result.getDateAdjustments(); adjustments && !adjustments->empty()) {
+        std::cout << "\nDate Adjustments:" << std::endl;
+        std::cout << "  Total adjustments: " << adjustments->size() << std::endl;
+
+        std::size_t significantAdjustments = 0;
+        for (const auto& adj : *adjustments) {
+            if (std::abs(adj.daysDifference()) > 1) {
+                ++significantAdjustments;
+            }
         }
 
-        std::cout << "  Pre-Tax Return:      " << std::setprecision(2)
-                  << preTaxReturn << "%" << std::endl;
-        std::cout << "  After-Tax Return:    " << std::setprecision(2)
-                  << result.afterTaxReturn << "%" << std::endl;
-
-        std::cout << "  Tax Efficiency:      " << std::setprecision(2)
-                  << result.taxEfficiency << "%" << std::endl;
+        if (significantAdjustments > 0) {
+            std::cout << "  Significant (>1 day): " << significantAdjustments << std::endl;
+        }
     }
 
-
-
-    std::cout << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
 }
+
+
 
 } // namespace portfolio

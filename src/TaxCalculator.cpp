@@ -151,7 +151,7 @@ TaxSummary TaxCalculator::calculateYearEndTax()
     summary.dividendTax = summary.totalDividends * ndflRate_;
 
     // Учитываем неуплаченный налог с прошлых лет
-    summary.totalTax = summary.capitalGainsTax + summary.dividendTax + unpaidTax_;
+    summary.totalTax = summary.capitalGainsTax + /*summary.dividendTax +*/ unpaidTax_;
 
     return summary;
 }

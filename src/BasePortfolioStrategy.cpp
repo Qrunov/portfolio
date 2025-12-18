@@ -443,14 +443,11 @@ std::expected<void, std::string> BasePortfolioStrategy::processYearEndTaxes(
         } else {
             double cashRaised = *rebalanceResult;
 
-            context.cashBalance -= cashRaised;
-            totalTaxesPaidDuringBacktest_ += cashRaised;
+            context.cashBalance -= shortfall;
+            totalTaxesPaidDuringBacktest_ += shortfall;
 
             std::cout << "   💰 Tax paid from rebalancing: ₽" << cashRaised << std::endl;
             std::cout << "   💵 Remaining cash: ₽" << context.cashBalance << std::endl;
-
-            // Обновляем shortfall
-            shortfall -= cashRaised;
         }
     }
 
@@ -496,7 +493,7 @@ std::expected<double, std::string> BasePortfolioStrategy::rebalanceForTaxPayment
         }
 
         double currentShares = context.holdings[instrumentId];
-        if (currentShares < 0.0001) {
+        if (currentShares < 1) {
             continue;
         }
 
@@ -513,7 +510,7 @@ std::expected<double, std::string> BasePortfolioStrategy::rebalanceForTaxPayment
         }
 
         double price = *priceResult;
-        double sharesToSell = std::floor(targetSale / price);
+        double sharesToSell = std::ceil(targetSale / price);
 
         sharesToSell = std::min(sharesToSell, std::floor(currentShares));
 
@@ -631,6 +628,8 @@ double BasePortfolioStrategy::calculatePortfolioValue(const TradingContext& cont
             if (priceResult) {
                 totalValue += shares * (*priceResult);
             }
+            else
+                std::cout << "no data for " << instrumentId << std::endl;
         }
     }
 
@@ -648,6 +647,15 @@ std::expected<double, std::string> BasePortfolioStrategy::getPrice(
 
     const auto& prices = context.priceData.at(instrumentId);
     auto it = prices.find(date);
+    //TODO: поиск самой близкой подходящей даты
+    //emerage invalid fix
+    for (const auto& [dt, price] : prices)
+    {
+        if (dt >= date)
+            return price;
+    }
+    return prices.rbegin() -> second;
+    //end invalid fix
 
     if (it != prices.end()) {
         return it->second;
@@ -935,8 +943,7 @@ IPortfolioStrategy::BacktestResult BasePortfolioStrategy::calculateFinalResults(
         if (value <= 0.0) {
             continue;
         }
-
-        // Инициализируем пик первым положительным значением
+         // Инициализируем пик первым положительным значением
         if (!peakInitialized) {
             peak = value;
             peakInitialized = true;

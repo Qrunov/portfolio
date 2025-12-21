@@ -67,7 +67,10 @@ portfolio_add_test(
 )
 
 
-
-#TODO: добавить тест для проверки RiskFreeRateCalculator
+portfolio_add_test(
+    NAME risk_free_rate_calculator
+    SOURCES test_risk_free_rate_calculator.cpp
+    LIBRARIES inmemory_db_impl
+)
 
 message(STATUS "  ✓ Added test: inflation_adjuster")

@@ -6,6 +6,7 @@
 #include "InMemoryDatabase.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <numbers>
 
 namespace portfolio {
 namespace {

@@ -9,12 +9,12 @@ message(STATUS "  Configuring CSV DataSource plugin...")
 # ----------------------------------------------------------------------------
 
 add_library(csv_datasource_impl STATIC
-    ${CMAKE_SOURCE_DIR}/src/CSVDataSource.cpp
+    CSVDataSource.cpp
 )
 
 target_include_directories(csv_datasource_impl PUBLIC
     ${PORTFOLIO_INCLUDE_DIR}
-    ${CMAKE_SOURCE_DIR}/src  # Для CSVDataSource.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR} # Для CSVDataSource.hpp
 )
 
 target_link_libraries(csv_datasource_impl PUBLIC

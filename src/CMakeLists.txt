@@ -4,7 +4,7 @@
 
 set(PORTFOLIO_CORE_SOURCES
     Portfolio.cpp
-    CSVDataSource.cpp
+#    CSVDataSource.cpp
     BasePortfolioStrategy.cpp
     PortfolioManager.cpp
     TaxCalculator.cpp

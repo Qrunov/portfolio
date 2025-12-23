@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <boost/program_options.hpp>
 
 namespace portfolio {
 
@@ -12,7 +13,6 @@ namespace portfolio {
 // CSV Data Source Implementation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Абстрактный интерфейс для чтения файлов
 class IFileReader {
 public:
     virtual ~IFileReader() = default;
@@ -20,7 +20,6 @@ public:
         std::string_view filePath) = 0;
 };
 
-// Реальная реализация для чтения файлов
 class FileReader : public IFileReader {
 public:
     std::expected<std::vector<std::string>, std::string> readLines(
@@ -35,25 +34,33 @@ public:
         bool skipHeader = true,
         std::string_view dateFormat = "%Y-%m-%d");
 
-    // Инициализация CSV источника
-    // dataLocation: путь к CSV файлу
-    // dateSource: индекс столбца с датой (строка "0", "1", и т.д.)
-    Result initialize(
-        std::string_view dataLocation,
-        std::string_view dateSource) override;
+    // ─────────────────────────────────────────────────────────────────────────
+    // Новый интерфейс с опциями командной строки
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // Добавить запрос на атрибут
-    // attributeName: имя атрибута ("close", "volume", и т.д.)
-    // attributeSource: индекс столбца (строка "1", "2", и т.д.)
+    // Инициализация из опций командной строки
+    Result initializeFromOptions(
+        const boost::program_options::variables_map& options) override;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Основные методы интерфейса
+    // ─────────────────────────────────────────────────────────────────────────
+
     Result addAttributeRequest(
         std::string_view attributeName,
         std::string_view attributeSource) override;
 
-    // Экстрактор: парсит CSV данные и возвращает результат
     std::expected<ExtractedData, std::string> extract() override;
 
-    // Очистить все запрошенные атрибуты
     void clearRequests() override;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Старый интерфейс (deprecated, но поддерживается)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    Result initialize(
+        std::string_view dataLocation,
+        std::string_view dateSource) override;
 
 private:
     std::shared_ptr<IFileReader> reader_;
@@ -61,10 +68,10 @@ private:
     bool skipHeader_;
     std::string dateFormat_;
 
-    // Конфигурация
+    // Состояние
     std::string filePath_;
     std::size_t dateColumnIndex_ = 0;
-    std::map<std::string, std::size_t> attributeRequests_;  // attributeName -> columnIndex
+    std::map<std::string, std::size_t> attributeRequests_;
 
     // Вспомогательные методы
     std::expected<TimePoint, std::string> parseDateString(

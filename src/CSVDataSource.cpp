@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <filesystem>
 
 namespace portfolio {
 
@@ -279,5 +280,60 @@ std::expected<std::size_t, std::string> CSVDataSource::parseColumnIndex(
                              std::string(indexStr) + " (" + e.what() + ")");
     }
 }
+
+Result CSVDataSource::initializeFromOptions(
+    const boost::program_options::variables_map& options) {
+
+    // Извлекаем специфичные для CSV опции
+
+    // 1. Обязательная опция: путь к файлу
+    if (!options.count("csv-file")) {
+        return std::unexpected(
+            "Required option 'csv-file' not provided.\n"
+            "Usage: --csv-file <path>");
+    }
+
+    filePath_ = options.at("csv-file").as<std::string>();
+
+    // 2. Опциональные параметры CSV
+    if (options.count("csv-delimiter")) {
+        delimiter_ = options.at("csv-delimiter").as<char>();
+    }
+
+    if (options.count("csv-skip-header")) {
+        skipHeader_ = options.at("csv-skip-header").as<bool>();
+    }
+
+    if (options.count("csv-date-format")) {
+        dateFormat_ = options.at("csv-date-format").as<std::string>();
+    }
+
+    // 3. Индекс колонки с датой
+    std::size_t dateColumn = 1;  // По умолчанию
+    if (options.count("csv-date-column")) {
+        dateColumn = options.at("csv-date-column").as<std::size_t>();
+    }
+
+    // Конвертируем с 1-based на 0-based
+    if (dateColumn == 0) {
+        return std::unexpected(
+            "Date column index must be >= 1 (columns indexed from 1)");
+    }
+    dateColumnIndex_ = dateColumn - 1;
+
+    // 4. Валидация: проверяем, что файл существует
+    if (!std::filesystem::exists(filePath_)) {
+        return std::unexpected(
+            "CSV file not found: " + filePath_);
+    }
+
+    // Очищаем предыдущие запросы атрибутов
+    attributeRequests_.clear();
+
+    return Result{};
+}
+
+
+
 
 }  // namespace portfolio

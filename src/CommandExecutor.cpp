@@ -389,39 +389,123 @@ void CommandExecutor::printHelp(std::string_view topic)
     } else if (topic == "load") {
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: load" << std::endl;
-        std::cout << "Load instrument data from CSV file" << std::endl;
+        std::cout << "Load instrument data using data source plugins" << std::endl;
         std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "USAGE:" << std::endl;
-        std::cout << "  portfolio load -f FILE -t ID -n NAME -s SOURCE [OPTIONS]" << std::endl;
+        std::cout << "  portfolio load --source PLUGIN [PLUGIN_OPTIONS] -t ID -n NAME -s SOURCE [OPTIONS]" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # Backward compatibility:" << std::endl;
+        std::cout << "  portfolio load --file FILE -t ID -n NAME -s SOURCE [OPTIONS]" << std::endl;
         std::cout << std::endl;
 
         std::cout << "REQUIRED OPTIONS:" << std::endl;
-        std::cout << "  -f, --file FILE         CSV file path" << std::endl;
-        std::cout << "  -t, --instrument-id ID  Instrument ID (e.g., SBER, GAZP)" << std::endl;
-        std::cout << "  -n, --name NAME         Instrument full name" << std::endl;
-        std::cout << "  -s, --source SOURCE     Data source name (e.g., MOEX, Yahoo)" << std::endl;
+        std::cout << "  Data source:" << std::endl;
+        std::cout << "    -S, --source PLUGIN       Data source plugin name" << std::endl;
+        std::cout << "      OR (backward compatibility):" << std::endl;
+        std::cout << "    -f, --file FILE           CSV file (equivalent to --source csv --csv-file FILE)" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  Instrument identification:" << std::endl;
+        std::cout << "    -t, --instrument-id ID    Instrument ID" << std::endl;
+        std::cout << "    -n, --name NAME           Instrument full name" << std::endl;
+        std::cout << "    -s, --source-name SOURCE  Data source name" << std::endl;
         std::cout << std::endl;
 
         std::cout << "OPTIONAL OPTIONS:" << std::endl;
-        std::cout << "  -T, --type TYPE         Instrument type (default: stock)" << std::endl;
-        std::cout << "  -d, --delimiter CHAR    CSV delimiter (default: ',')" << std::endl;
-        std::cout << "  --date-column NUM       Date column index, 1-based (default: 1)" << std::endl;
-        std::cout << "  --date-format FORMAT    Date format (default: %Y-%m-%d)" << std::endl;
-        std::cout << "  --skip-header BOOL      Skip CSV header (default: true)" << std::endl;
-        std::cout << "  -m, --map MAPPING       Attribute mapping (col:attr format)" << std::endl;
-        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path (for sqlite_db)" << std::endl;
+        std::cout << "  Instrument:" << std::endl;
+        std::cout << "    -T, --type TYPE           Instrument type (default: stock)" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  Attribute Mapping:" << std::endl;
+        std::cout << "    -m, --map MAPPING         Map attribute to data source" << std::endl;
+        std::cout << "                              Format depends on plugin" << std::endl;
+        std::cout << "                              Can be specified multiple times" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  Database:" << std::endl;
+        std::cout << "    --db TYPE                 Database type" << std::endl;
+        std::cout << "    --db-path PATH            Database file path" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  # Load SBER data to in-memory database" << std::endl;
-        std::cout << "  portfolio load -f sber.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
-        std::cout << "    -m 2:Close -m 3:Volume" << std::endl;
+        // ═════════════════════════════════════════════════════════════════════
+        // Динамический вывод опций доступных плагинов
+        // ═════════════════════════════════════════════════════════════════════
+
+        std::cout << "AVAILABLE PLUGINS:" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+
+        if (dataSourcePluginManager_) {
+            try {
+                auto allMetadata = dataSourcePluginManager_->getAllPluginMetadata();
+
+                if (allMetadata.empty()) {
+                    std::cout << "  No datasource plugins found." << std::endl;
+                    std::cout << "  Plugin path: " << dataSourcePluginManager_->getPluginPath() << std::endl;
+                } else {
+                    for (const auto& metadata : allMetadata) {
+                        std::cout << "\n  Plugin: " << metadata.systemName;
+                        if (!metadata.displayName.empty()) {
+                            std::cout << " (" << metadata.displayName << ")";
+                        }
+                        std::cout << std::endl;
+
+                        if (!metadata.description.empty()) {
+                            std::cout << "  " << metadata.description << std::endl;
+                        }
+
+                        if (metadata.commandLineOptions) {
+                            std::cout << "\n  Options:" << std::endl;
+                            std::ostringstream oss;
+                            oss << *metadata.commandLineOptions;
+
+                            // Форматируем вывод с отступами
+                            std::string optionsStr = oss.str();
+                            std::istringstream iss(optionsStr);
+                            std::string line;
+                            while (std::getline(iss, line)) {
+                                if (!line.empty()) {
+                                    std::cout << "    " << line << std::endl;
+                                }
+                            }
+                        }
+
+                        if (!metadata.examples.empty()) {
+                            std::cout << "\n  Examples:" << std::endl;
+                            for (const auto& example : metadata.examples) {
+                                if (!example.empty() && example[0] == '#') {
+                                    // Это комментарий
+                                    std::cout << "    " << example << std::endl;
+                                } else {
+                                    // Это команда
+                                    std::cout << "    $ " << example << std::endl;
+                                }
+                            }
+                        }
+
+                        std::cout << std::endl;
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cout << "  Error loading plugin metadata: " << e.what() << std::endl;
+            }
+        } else {
+            std::cout << "  Plugin manager not initialized" << std::endl;
+        }
+
+        std::cout << std::string(70, '-') << std::endl;
         std::cout << std::endl;
-        std::cout << "  # Load data to sqlite_db database" << std::endl;
-        std::cout << "  portfolio load -f data.csv -t GAZP -n \"Gazprom\" -s MOEX \\" << std::endl;
-        std::cout << "    --db sqlite_db --db-path=./market.db" << std::endl;
+
+        std::cout << "GENERAL EXAMPLES:" << std::endl;
+        std::cout << "  # Using CSV plugin (new way):" << std::endl;
+        std::cout << "  portfolio load --source csv --csv-file data.csv \\" << std::endl;
+        std::cout << "    -t SBER -n \"Sberbank\" -s MOEX -m Close:2 -m Volume:3 --db inmemory_db" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  # Using CSV plugin (backward compatibility):" << std::endl;
+        std::cout << "  portfolio load --file data.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
+        std::cout << "    -m Close:2 -m Volume:3 --db inmemory_db" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "SEE ALSO:" << std::endl;
+        std::cout << "  portfolio plugin list datasource    List available plugins" << std::endl;
+        std::cout << "  portfolio plugin info <name>         Show plugin details" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "instrument") {
@@ -1739,175 +1823,300 @@ std::expected<void, std::string> CommandExecutor::executeSourceList(
 // ═════════════════════════════════════════════════════════════════════════════
 // Load
 // ═════════════════════════════════════════════════════════════════════════════
+std::expected<void, std::string> CommandExecutor::executeLoad(
+    const ParsedCommand& cmd) {
 
-std::expected<void, std::string> CommandExecutor::executeLoad(const ParsedCommand& cmd) {
-    // Проверка обязательных опций
-    auto filePathResult = getRequiredOption<std::string>(cmd, "file");
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 1: Определение источника данных
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::string pluginName;
+    bool isLegacyMode = false;
+
+    // Проверяем обратную совместимость: --file
+    if (cmd.options.count("file")) {
+        if (cmd.options.count("source")) {
+            return std::unexpected(
+                "Cannot use both --file and --source options.\n"
+                "Use --file for backward compatibility (CSV only)\n"
+                "or --source for plugin-based approach.");
+        }
+
+        // Legacy mode: --file эквивалентен --source csv --csv-file <path>
+        pluginName = "csv";
+        isLegacyMode = true;
+
+        std::cout << "Note: Using --file in legacy mode (equivalent to --source csv)\n"
+                  << "Consider using --source csv --csv-file <path> in new code\n"
+                  << std::endl;
+
+    } else if (cmd.options.count("source")) {
+        pluginName = cmd.options.at("source").as<std::string>();
+
+    } else {
+        return std::unexpected(
+            "Data source not specified.\n"
+            "Use either:\n"
+            "  --file <path>  (backward compatibility for CSV)\n"
+            "  or\n"
+            "  --source <plugin>  (with plugin-specific options)\n\n"
+            "Examples:\n"
+            "  portfolio load --file data.csv -t SBER ...\n"
+            "  portfolio load --source csv --csv-file data.csv -t SBER ...");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 2: Валидация обязательных опций инструмента
+    // ═════════════════════════════════════════════════════════════════════════
+
     auto instrumentIdResult = getRequiredOption<std::string>(cmd, "instrument-id");
     auto nameResult = getRequiredOption<std::string>(cmd, "name");
-    auto sourceResult = getRequiredOption<std::string>(cmd, "source");
+    auto sourceNameResult = getRequiredOption<std::string>(cmd, "source-name");
 
-    if (!filePathResult || !instrumentIdResult || !nameResult || !sourceResult) {
-        return std::unexpected("Missing required options. Use 'portfolio load --help' for usage.");
+    if (!instrumentIdResult || !nameResult || !sourceNameResult) {
+        return std::unexpected(
+            "Missing required options.\n"
+            "Required: --instrument-id, --name, --source-name\n"
+            "Use 'portfolio load --help' for usage.");
     }
 
-    std::string filePath = filePathResult.value();
     std::string instrumentId = instrumentIdResult.value();
     std::string name = nameResult.value();
-    std::string source = sourceResult.value();
-
-    // Опциональные параметры
+    std::string sourceName = sourceNameResult.value();
     std::string type = cmd.options.at("type").as<std::string>();
-    char delimiter = cmd.options.at("delimiter").as<char>();
-    bool skipHeader = cmd.options.at("skip-header").as<bool>();
-    std::string dateFormat = cmd.options.at("date-format").as<std::string>();
-    std::size_t dateColumn = cmd.options.at("date-column").as<std::size_t>();
 
-    // Конвертируем индекс колонки с 1-based на 0-based
-    if (dateColumn == 0) {
-        return std::unexpected("Date column index must be >= 1 (columns indexed from 1)");
-    }
-    std::size_t dateColumnIndex = dateColumn - 1;
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 3: Инициализация базы данных
+    // ═════════════════════════════════════════════════════════════════════════
 
-    // Опции БД
     std::string dbType = cmd.options.at("db").as<std::string>();
     std::string dbPath;
     if (cmd.options.count("db-path")) {
         dbPath = cmd.options.at("db-path").as<std::string>();
     }
 
-    // Инициализируем базу данных если необходимо
     auto dbResult = ensureDatabase(dbType, dbPath);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 4: Вывод информации о загрузке
+    // ═════════════════════════════════════════════════════════════════════════
+
     std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "Loading Data from CSV using Plugin" << std::endl;
+    std::cout << "Loading Data Using Data Source Plugin" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
-    std::cout << "Database type: " << dbType << std::endl;
+    std::cout << "Database type:       " << dbType << std::endl;
     if (!dbPath.empty()) {
-        std::cout << "Database path: " << dbPath << std::endl;
+        std::cout << "Database path:       " << dbPath << std::endl;
+    }
+    std::cout << "Data source plugin:  " << pluginName << std::endl;
+    if (isLegacyMode) {
+        std::cout << "Mode:                Legacy (--file)" << std::endl;
     }
     std::cout << std::endl;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ИСПОЛЬЗОВАНИЕ ПЛАГИНА DATASOURCE ВМЕСТО ПРЯМОГО СОЗДАНИЯ
-    // ════════════════════════════════════════════════════════════════════════
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 5: Загрузка плагина источника данных
+    // ═════════════════════════════════════════════════════════════════════════
 
-    // Формируем конфигурацию для плагина
-    std::ostringstream configStream;
-    configStream << "delimiter=" << delimiter 
-                 << ",skipHeader=" << (skipHeader ? "true" : "false")
-                 << ",dateFormat=" << dateFormat;
-    std::string config = configStream.str();
-
-    // Загружаем плагин CSV DataSource
-    auto dataSourceResult = dataSourcePluginManager_->load("csv", config);
+    auto dataSourceResult = dataSourcePluginManager_->load(pluginName, "");
     if (!dataSourceResult) {
-        return std::unexpected("Failed to load CSV datasource plugin: " + 
-                             dataSourceResult.error());
+        return std::unexpected(
+            "Failed to load data source plugin '" + pluginName +
+            "': " + dataSourceResult.error());
     }
 
     auto dataSource = dataSourceResult.value();
+    std::cout << "✓ Data source plugin loaded" << std::endl;
 
-    std::cout << "Loaded datasource plugin: csv" << std::endl;
-    std::cout << "Configuration: " << config << std::endl;
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 6: Подготовка опций для плагина
+    // ═════════════════════════════════════════════════════════════════════════
+
+    po::variables_map pluginOptions = cmd.options;
+
+    // Обратная совместимость: преобразуем --file в --csv-file
+    if (isLegacyMode && cmd.options.count("file")) {
+        std::string filePath = cmd.options.at("file").as<std::string>();
+        pluginOptions.insert({"csv-file",
+                              po::variable_value(filePath, false)});
+
+        // Также копируем старые CSV-специфичные опции если они есть
+        if (cmd.options.count("delimiter")) {
+            pluginOptions.insert({"csv-delimiter",
+                                  cmd.options.at("delimiter")});
+        }
+        if (cmd.options.count("skip-header")) {
+            pluginOptions.insert({"csv-skip-header",
+                                  cmd.options.at("skip-header")});
+        }
+        if (cmd.options.count("date-format")) {
+            pluginOptions.insert({"csv-date-format",
+                                  cmd.options.at("date-format")});
+        }
+        if (cmd.options.count("date-column")) {
+            pluginOptions.insert({"csv-date-column",
+                                  cmd.options.at("date-column")});
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 7: Инициализация плагина из опций командной строки
+    // ═════════════════════════════════════════════════════════════════════════
+
+    auto initResult = dataSource->initializeFromOptions(pluginOptions);
+    if (!initResult) {
+        return std::unexpected(
+            "Failed to initialize data source: " + initResult.error());
+    }
+
+    std::cout << "✓ Data source initialized from command line options" << std::endl;
     std::cout << std::endl;
 
-    // Инициализируем источник данных
-    std::string dateSourceStr = std::to_string(dateColumnIndex);
-    auto initResult = dataSource->initialize(filePath, dateSourceStr);
-    if (!initResult) {
-        return std::unexpected("Failed to initialize CSV data source: " + 
-                             initResult.error());
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 8: Добавление запросов атрибутов
+    // ═════════════════════════════════════════════════════════════════════════
+
+    if (!cmd.options.count("map")) {
+        return std::unexpected(
+            "No attribute mappings specified.\n"
+            "Use -m or --map to specify attribute mappings.\n"
+            "Example: -m Close:2 -m Volume:3");
     }
 
-    // Добавляем запросы атрибутов из маппинга
-    if (cmd.options.count("map")) {
-        auto mappings = cmd.options.at("map").as<std::vector<std::string>>();
-        for (const auto& mapping : mappings) {
-            std::size_t pos = mapping.find(':');
-            if (pos == std::string::npos) {
-                return std::unexpected("Invalid mapping format: " + mapping + 
-                                     ". Expected 'column:attribute'");
-            }
+    auto mappings = cmd.options.at("map").as<std::vector<std::string>>();
 
-            std::string attrName = mapping.substr(0, pos);      // До ':'
-            std::string columnStr = mapping.substr(pos + 1);    // После ':'
-
-            // Конвертируем column с 1-based на 0-based
-            std::size_t columnNum;
-            try {
-                columnNum = std::stoull(columnStr);
-                if (columnNum == 0) {
-                    return std::unexpected("Column index must be >= 1 in mapping: " + mapping);
-                }
-                columnNum--; // Convert to 0-based
-            } catch (...) {
-                return std::unexpected("Invalid column number in mapping '" + mapping +
-                                       "'. Expected format: attribute:column (e.g., close:6)");
-            }
-
-            auto addResult = dataSource->addAttributeRequest(
-                attrName, 
-                std::to_string(columnNum));
-            
-            if (!addResult) {
-                return std::unexpected("Failed to add attribute request: " + 
-                                     addResult.error());
-            }
-
-            std::cout << "  Mapping: column " << (columnNum + 1) 
-                      << " -> " << attrName << std::endl;
+    std::cout << "Attribute mappings:" << std::endl;
+    for (const auto& mapping : mappings) {
+        std::size_t pos = mapping.find(':');
+        if (pos == std::string::npos) {
+            return std::unexpected(
+                "Invalid mapping format: " + mapping +
+                ". Expected 'attribute:source'");
         }
+
+        std::string attrName = mapping.substr(0, pos);
+        std::string sourceSpec = mapping.substr(pos + 1);
+
+        // Для CSV плагина конвертируем 1-based в 0-based
+        if (pluginName == "csv") {
+            try {
+                std::size_t columnNum = std::stoull(sourceSpec);
+                if (columnNum == 0) {
+                    return std::unexpected(
+                        "Column index must be >= 1 in mapping: " + mapping);
+                }
+                columnNum--;  // Convert to 0-based
+                sourceSpec = std::to_string(columnNum);
+            } catch (...) {
+                return std::unexpected(
+                    "Invalid column number in mapping '" + mapping + "'");
+            }
+        }
+
+        auto addResult = dataSource->addAttributeRequest(attrName, sourceSpec);
+        if (!addResult) {
+            return std::unexpected(
+                "Failed to add attribute request for '" + attrName +
+                "': " + addResult.error());
+        }
+
+        std::cout << "  " << attrName << " -> " << sourceSpec << std::endl;
     }
 
-    // Экстрагируем данные
-    std::cout << "\nExtracting data..." << std::endl;
+    std::cout << std::endl;
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 9: Извлечение данных
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::cout << "Extracting data..." << std::endl;
+
     auto extractResult = dataSource->extract();
     if (!extractResult) {
-        return std::unexpected("Failed to extract data: " + extractResult.error());
+        return std::unexpected(
+            "Failed to extract data: " + extractResult.error());
     }
 
-    auto extractedData = std::move(*extractResult);
+    const auto& extractedData = extractResult.value();
 
-    // Сохраняем инструмент
-    std::cout << "Saving instrument: " << instrumentId << std::endl;
-    auto saveInstResult = database_->saveInstrument(instrumentId, name, type, source);
-    if (!saveInstResult) {
-        return std::unexpected("Failed to save instrument: " + saveInstResult.error());
+    std::cout << "✓ Data extracted successfully" << std::endl;
+    std::cout << "  Total attributes: " << extractedData.size() << std::endl;
+
+    for (const auto& [attrName, timeSeries] : extractedData) {
+        std::cout << "  " << attrName << ": " << timeSeries.size()
+        << " data points" << std::endl;
     }
 
-    // Сохраняем атрибуты
+    std::cout << std::endl;
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 10: Сохранение в базу данных
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::cout << "Saving to database..." << std::endl;
+
+    if (!database_) {
+        return std::unexpected("Database not initialized");
+    }
+
+    auto addInstrumentResult = database_->saveInstrument(
+        instrumentId,
+        name,
+        type,
+        "");
+
+    if (!addInstrumentResult) {
+        return std::unexpected(
+            "Failed to add instrument: " + addInstrumentResult.error());
+    }
+
+    std::cout << "✓ Instrument added: " << instrumentId << std::endl;
+
     std::size_t totalSaved = 0;
-    for (const auto& [attrName, dataPoints] : extractedData) {
-        std::cout << "Saving attribute '" << attrName << "': " 
-                  << dataPoints.size() << " data points... ";
 
+    for (const auto& [attrName, timeSeries] : extractedData) {
         auto saveResult = database_->saveAttributes(
-            instrumentId, 
-            attrName, 
-            source, 
-            dataPoints);
+            instrumentId,
+            sourceName,
+            attrName,
+            timeSeries);
 
         if (!saveResult) {
-            std::cout << "FAILED" << std::endl;
-            return std::unexpected("Failed to save attribute '" + attrName + 
-                                 "': " + saveResult.error());
+            std::cerr << "Warning: Failed to save attribute '" << attrName
+                      << "': " << saveResult.error() << std::endl;
+            continue;
         }
 
-        totalSaved += dataPoints.size();
-        std::cout << "OK" << std::endl;
+        totalSaved += timeSeries.size();
+        std::cout << "  ✓ " << attrName << ": " << timeSeries.size()
+                  << " values saved" << std::endl;
     }
 
-    std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "Data loaded successfully!" << std::endl;
-    std::cout << "Total data points saved: " << totalSaved << std::endl;
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 11: Итоговая информация
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::cout << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Data Loading Complete" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+    std::cout << "Instrument:           " << instrumentId << std::endl;
+    std::cout << "Name:                 " << name << std::endl;
+    std::cout << "Source:               " << sourceName << std::endl;
+    std::cout << "Data source plugin:   " << pluginName << std::endl;
+    std::cout << "Total attributes:     " << extractedData.size() << std::endl;
+    std::cout << "Total data points:    " << totalSaved << std::endl;
     std::cout << std::string(70, '=') << std::endl;
 
     return {};
 }
+
+
+
+
 
 std::expected<void, std::string> CommandExecutor::executePlugins(const ParsedCommand& cmd) {
 

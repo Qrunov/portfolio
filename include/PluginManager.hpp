@@ -10,19 +10,33 @@
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
+#include <boost/program_options.hpp>
 
 namespace portfolio {
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TYPE TRAITS: Определение подкаталога и функций для каждого типа плагина
-// ═══════════════════════════════════════════════════════════════════════════════
 
 // Forward declarations
 class IPortfolioDatabase;
 class IPortfolioStrategy;
 class IDataSource;
 
-// Базовый trait (специализации ниже)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Plugin Command Line Metadata
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct PluginCommandLineMetadata {
+    std::string systemName;       // Системное имя (csv, json, api)
+    std::string displayName;      // Отображаемое имя (CSVDataSource)
+    std::string description;      // Краткое описание
+    std::vector<std::string> examples;  // Примеры использования
+
+    // Опции командной строки (опциональны, могут быть nullptr если плагин не поддерживает)
+    const boost::program_options::options_description* commandLineOptions;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TYPE TRAITS: Определение подкаталога и функций для каждого типа плагина
+// ═══════════════════════════════════════════════════════════════════════════════
+
 template<typename PluginInterface>
 struct PluginTypeTraits {
     static constexpr const char* subdirectory() { return "unknown"; }
@@ -31,7 +45,6 @@ struct PluginTypeTraits {
     static constexpr const char* typeName() { return "unknown"; }
 };
 
-// Специализация для IPortfolioDatabase
 template<>
 struct PluginTypeTraits<IPortfolioDatabase> {
     static constexpr const char* subdirectory() { return "database"; }
@@ -40,7 +53,6 @@ struct PluginTypeTraits<IPortfolioDatabase> {
     static constexpr const char* typeName() { return "database"; }
 };
 
-// Специализация для IPortfolioStrategy
 template<>
 struct PluginTypeTraits<IPortfolioStrategy> {
     static constexpr const char* subdirectory() { return "strategy"; }
@@ -49,7 +61,6 @@ struct PluginTypeTraits<IPortfolioStrategy> {
     static constexpr const char* typeName() { return "strategy"; }
 };
 
-// Специализация для IDataSource
 template<>
 struct PluginTypeTraits<IDataSource> {
     static constexpr const char* subdirectory() { return "datasource"; }
@@ -59,18 +70,22 @@ struct PluginTypeTraits<IDataSource> {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PLUGIN MANAGER: Унифицированное управление плагинами
+// Plugin Manager
 // ═══════════════════════════════════════════════════════════════════════════════
 
 template<typename PluginInterface>
 class PluginManager {
-  public:
+public:
+    using Traits = PluginTypeTraits<PluginInterface>;
     using CreateFunc = PluginInterface* (*)(const char*);
     using DestroyFunc = void (*)(PluginInterface*);
     using GetNameFunc = const char* (*)();
     using GetVersionFunc = const char* (*)();
     using GetTypeFunc = const char* (*)();
-    using Traits = PluginTypeTraits<PluginInterface>;
+    using GetSystemNameFunc = const char* (*)();
+    using GetDescriptionFunc = const char* (*)();
+    using GetExamplesFunc = const char* (*)();
+    using GetOptionsFunc = const boost::program_options::options_description* (*)();
 
     using Result = std::expected<void, std::string>;
 
@@ -81,38 +96,37 @@ class PluginManager {
         GetNameFunc getName;
         GetVersionFunc getVersion;
         GetTypeFunc getType;
+        GetSystemNameFunc getSystemName;
+        GetDescriptionFunc getDescription;
+        GetExamplesFunc getExamples;
+        GetOptionsFunc getOptions;
+
         std::string pluginType;
         std::string displayName;
+        std::string systemName;
+        std::string version;
     };
 
     struct AvailablePlugin {
         std::string name;
         std::string displayName;
+        std::string systemName;
         std::string version;
         std::string type;
         std::string path;
+        std::string description;
+        std::vector<std::string> examples;
     };
 
-    // Custom deleter для shared_ptr
     struct PluginDeleter {
-        DestroyFunc destroy;
-
+        DestroyFunc destroyFunc;
         void operator()(PluginInterface* ptr) const {
-            if (ptr && destroy) {
-                destroy(ptr);
+            if (ptr && destroyFunc) {
+                destroyFunc(ptr);
             }
         }
     };
 
-    // Disable copy
-    PluginManager(const PluginManager&) = delete;
-    PluginManager& operator=(const PluginManager&) = delete;
-
-    // Move is allowed
-    PluginManager(PluginManager&&) = default;
-    PluginManager& operator=(PluginManager&&) = default;
-
-    // Constructor
     explicit PluginManager(std::string_view pluginPath = "./plugins")
         : pluginPath_(pluginPath) {}
 
@@ -120,22 +134,102 @@ class PluginManager {
         unloadAll();
     }
 
-    // Получить путь к директории плагинов
-    const std::string& getPluginPath() const noexcept {
+    std::string getPluginPath() const {
         return pluginPath_;
     }
 
-    // Установить путь к директории плагинов
     void setPluginPath(std::string_view path) {
         pluginPath_ = std::string(path);
     }
 
-    // Загрузить плагин по имени и создать экземпляр
+    // ═════════════════════════════════════════════════════════════════════════
+    // Получение метаданных опций командной строки
+    // ═════════════════════════════════════════════════════════════════════════
+
+    // Получить метаданные опций командной строки для плагина
+    std::expected<PluginCommandLineMetadata, std::string>
+    getPluginCommandLineMetadata(std::string_view name) const {
+
+        std::filesystem::path pluginDir =
+            std::filesystem::path(pluginPath_) / Traits::subdirectory();
+
+        std::string soName = std::string(name) + ".so";
+        std::filesystem::path soPath = pluginDir / soName;
+
+        if (!std::filesystem::exists(soPath)) {
+            return std::unexpected(
+                std::string("Plugin library not found: ") + soPath.string());
+        }
+
+        // Загружаем библиотеку временно только для чтения метаданных
+        void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (!handle) {
+            std::string error = dlerror() ? dlerror() : "Unknown dlopen error";
+            return std::unexpected(error);
+        }
+
+        PluginCommandLineMetadata metadata;
+
+        // Загружаем базовые функции
+        auto getNameFunc = reinterpret_cast<GetNameFunc>(
+            dlsym(handle, "getPluginName"));
+        auto getSystemNameFunc = reinterpret_cast<GetSystemNameFunc>(
+            dlsym(handle, "getPluginSystemName"));
+        auto getDescFunc = reinterpret_cast<GetDescriptionFunc>(
+            dlsym(handle, "getPluginDescription"));
+        auto getExamplesFunc = reinterpret_cast<GetExamplesFunc>(
+            dlsym(handle, "getPluginExamples"));
+        auto getOptionsFunc = reinterpret_cast<GetOptionsFunc>(
+            dlsym(handle, "getCommandLineOptions"));
+
+        // Заполняем метаданные
+        metadata.systemName = getSystemNameFunc ? getSystemNameFunc() : std::string(name);
+        metadata.displayName = getNameFunc ? getNameFunc() : std::string(name);
+        metadata.description = getDescFunc ? getDescFunc() : "";
+
+        // Парсим примеры (разделенные '\n')
+        if (getExamplesFunc) {
+            std::string examplesStr = getExamplesFunc();
+            std::istringstream iss(examplesStr);
+            std::string line;
+            while (std::getline(iss, line)) {
+                if (!line.empty()) {
+                    metadata.examples.push_back(line);
+                }
+            }
+        }
+
+        // Получаем опции командной строки
+        metadata.commandLineOptions = getOptionsFunc ? getOptionsFunc() : nullptr;
+
+        dlclose(handle);
+
+        return metadata;
+    }
+
+    // Получить метаданные для всех доступных плагинов
+    std::vector<PluginCommandLineMetadata> getAllPluginMetadata() const {
+        std::vector<PluginCommandLineMetadata> allMetadata;
+
+        auto availablePlugins = scanAvailablePlugins();
+        for (const auto& plugin : availablePlugins) {
+            auto metadataResult = getPluginCommandLineMetadata(plugin.systemName);
+            if (metadataResult) {
+                allMetadata.push_back(metadataResult.value());
+            }
+        }
+
+        return allMetadata;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Существующие методы (без изменений)
+    // ═════════════════════════════════════════════════════════════════════════
+
     std::expected<std::shared_ptr<PluginInterface>, std::string> load(
         std::string_view name,
         std::string_view config = "") {
 
-        // Сначала пытаемся загрузить библиотеку плагина
         auto loadResult = loadPlugin(name);
         if (!loadResult) {
             return std::unexpected(loadResult.error());
@@ -143,21 +237,18 @@ class PluginManager {
 
         const PluginInfo& info = loadResult.value().get();
 
-        // Создаём экземпляр плагина
         PluginInterface* instance = info.create(config.data());
         if (!instance) {
             return std::unexpected(
-                std::string("Plugin '") + std::string(name) + 
+                std::string("Plugin '") + std::string(name) +
                 "' create function returned nullptr");
         }
 
-        // Оборачиваем в shared_ptr с custom deleter
         return std::shared_ptr<PluginInterface>(
             instance,
             PluginDeleter{info.destroy});
     }
 
-    // Выгрузить конкретный плагин
     Result unload(std::string_view name) {
         auto it = loadedPlugins_.find(std::string(name));
         if (it == loadedPlugins_.end()) {
@@ -173,7 +264,6 @@ class PluginManager {
         return {};
     }
 
-    // Выгрузить все плагины
     void unloadAll() {
         for (auto& [name, info] : loadedPlugins_) {
             if (info.handle) {
@@ -183,73 +273,85 @@ class PluginManager {
         loadedPlugins_.clear();
     }
 
-    // Получить информацию о загруженном плагине
     std::expected<const PluginInfo*, std::string> getPluginInfo(
         std::string_view name) const {
-        
+
         auto it = loadedPlugins_.find(std::string(name));
         if (it == loadedPlugins_.end()) {
             return std::unexpected(
                 std::string("Plugin not loaded: ") + std::string(name));
         }
+
         return &it->second;
     }
 
-    // Получить список доступных (не загруженных) плагинов
     std::vector<AvailablePlugin> scanAvailablePlugins() const {
         std::vector<AvailablePlugin> available;
 
-        // Формируем путь к поддиректории для данного типа плагинов
-        std::filesystem::path typeDir =
+        std::filesystem::path pluginDir =
             std::filesystem::path(pluginPath_) / Traits::subdirectory();
 
-        if (!std::filesystem::exists(typeDir) ||
-            !std::filesystem::is_directory(typeDir)) {
+        if (!std::filesystem::exists(pluginDir) ||
+            !std::filesystem::is_directory(pluginDir)) {
             return available;
         }
 
-        // ИСПРАВЛЕНИЕ: Сканируем .so файлы напрямую в typeDir (плоская структура)
-        // Вместо поиска подкаталогов, ищем .so файлы напрямую
-        for (const auto& entry : std::filesystem::directory_iterator(typeDir)) {
-            // Пропускаем подкаталоги и не-.so файлы
-            if (!entry.is_regular_file()) {
-                continue;
-            }
+        for (const auto& entry : std::filesystem::directory_iterator(pluginDir)) {
+            if (!entry.is_regular_file()) continue;
 
             std::string filename = entry.path().filename().string();
-
-            // Проверяем расширение .so
-            if (filename.size() < 3 || filename.substr(filename.size() - 3) != ".so") {
+            if (filename.size() <= 3 || filename.substr(filename.size() - 3) != ".so") {
                 continue;
             }
 
-            // Получаем имя плагина (убираем .so расширение)
-            std::string pluginName = filename.substr(0, filename.size() - 3);
             std::filesystem::path soPath = entry.path();
+            void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+            if (!handle) {
+                continue;
+            }
 
-            // Попробуем загрузить плагин временно, чтобы получить метаданные
-            void* handle = dlopen(soPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
-            if (handle) {
-                auto getNameFunc = reinterpret_cast<GetNameFunc>(
-                    dlsym(handle, "getPluginName"));
-                auto getVersionFunc = reinterpret_cast<GetVersionFunc>(
-                    dlsym(handle, "getPluginVersion"));
-                auto getTypeFunc = reinterpret_cast<GetTypeFunc>(
-                    dlsym(handle, "getPluginType"));
+            auto getNameFunc = reinterpret_cast<GetNameFunc>(
+                dlsym(handle, "getPluginName"));
+            auto getVersionFunc = reinterpret_cast<GetVersionFunc>(
+                dlsym(handle, "getPluginVersion"));
+            auto getTypeFunc = reinterpret_cast<GetTypeFunc>(
+                dlsym(handle, "getPluginType"));
+            auto getSystemNameFunc = reinterpret_cast<GetSystemNameFunc>(
+                dlsym(handle, "getPluginSystemName"));
+            auto getDescFunc = reinterpret_cast<GetDescriptionFunc>(
+                dlsym(handle, "getPluginDescription"));
+            auto getExamplesFunc = reinterpret_cast<GetExamplesFunc>(
+                dlsym(handle, "getPluginExamples"));
 
+            if (getNameFunc) {
                 AvailablePlugin plugin;
+
+                std::string pluginName = filename.substr(0, filename.size() - 3);
                 plugin.name = pluginName;
-                plugin.displayName = getNameFunc ? getNameFunc() : pluginName;
+                plugin.systemName = getSystemNameFunc ? getSystemNameFunc() : pluginName;
+                plugin.displayName = getNameFunc();
                 plugin.version = getVersionFunc ? getVersionFunc() : "unknown";
                 plugin.type = getTypeFunc ? getTypeFunc() : Traits::typeName();
                 plugin.path = soPath.string();
+                plugin.description = getDescFunc ? getDescFunc() : "";
+
+                if (getExamplesFunc) {
+                    std::string examplesStr = getExamplesFunc();
+                    std::istringstream iss(examplesStr);
+                    std::string line;
+                    while (std::getline(iss, line)) {
+                        if (!line.empty()) {
+                            plugin.examples.push_back(line);
+                        }
+                    }
+                }
 
                 available.push_back(plugin);
-                dlclose(handle);
             }
+
+            dlclose(handle);
         }
 
-        // Сортируем по имени
         std::sort(available.begin(), available.end(),
                   [](const AvailablePlugin& a, const AvailablePlugin& b) {
                       return a.name < b.name;
@@ -258,24 +360,20 @@ class PluginManager {
         return available;
     }
 
-  private:
+private:
     std::string pluginPath_;
     std::map<std::string, PluginInfo> loadedPlugins_;
 
-    // Внутренняя функция для загрузки плагина (без создания экземпляра)
-    std::expected<std::reference_wrapper<const PluginInfo>, std::string> 
+    std::expected<std::reference_wrapper<const PluginInfo>, std::string>
     loadPlugin(std::string_view name) {
-        
-        // Проверяем, не загружен ли уже
+
         auto it = loadedPlugins_.find(std::string(name));
         if (it != loadedPlugins_.end()) {
             return std::cref(it->second);
         }
 
-        // Формируем путь к плагину
-        std::filesystem::path pluginDir = 
-            std::filesystem::path(pluginPath_) / 
-            Traits::subdirectory();
+        std::filesystem::path pluginDir =
+            std::filesystem::path(pluginPath_) / Traits::subdirectory();
 
         std::string soName = std::string(name) + ".so";
         std::filesystem::path soPath = pluginDir / soName;
@@ -285,34 +383,38 @@ class PluginManager {
                 std::string("Plugin library not found: ") + soPath.string());
         }
 
-        // Загружаем библиотеку
         void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
             std::string error = dlerror() ? dlerror() : "Unknown dlopen error";
             return std::unexpected(error);
         }
 
-        // Загружаем символы, используя имена из traits
         auto createFunc = reinterpret_cast<CreateFunc>(
             dlsym(handle, Traits::createFunctionName()));
-
         auto destroyFunc = reinterpret_cast<DestroyFunc>(
             dlsym(handle, Traits::destroyFunctionName()));
-
         auto getNameFunc = reinterpret_cast<GetNameFunc>(
             dlsym(handle, "getPluginName"));
         auto getVersionFunc = reinterpret_cast<GetVersionFunc>(
             dlsym(handle, "getPluginVersion"));
         auto getTypeFunc = reinterpret_cast<GetTypeFunc>(
             dlsym(handle, "getPluginType"));
+        auto getSystemNameFunc = reinterpret_cast<GetSystemNameFunc>(
+            dlsym(handle, "getPluginSystemName"));
+        auto getDescFunc = reinterpret_cast<GetDescriptionFunc>(
+            dlsym(handle, "getPluginDescription"));
+        auto getExamplesFunc = reinterpret_cast<GetExamplesFunc>(
+            dlsym(handle, "getPluginExamples"));
+        auto getOptionsFunc = reinterpret_cast<GetOptionsFunc>(
+            dlsym(handle, "getCommandLineOptions"));
 
         if (!createFunc || !destroyFunc || !getNameFunc) {
             dlclose(handle);
-            std::string error = "Plugin is missing required symbols: " + std::string(name);
-            return std::unexpected(error);
+            return std::unexpected(
+                "Plugin is missing required symbols: " + std::string(name));
         }
 
-        // Сохраняем информацию о плагине
+        std::string pluginName = std::string(name);
         PluginInfo info{
             handle,
             createFunc,
@@ -320,14 +422,19 @@ class PluginManager {
             getNameFunc,
             getVersionFunc,
             getTypeFunc,
+            getSystemNameFunc,
+            getDescFunc,
+            getExamplesFunc,
+            getOptionsFunc,
             std::string(Traits::typeName()),
-            getNameFunc ? getNameFunc() : std::string(name)
+            getNameFunc ? getNameFunc() : pluginName,
+            getSystemNameFunc ? getSystemNameFunc() : pluginName,
+            getVersionFunc ? getVersionFunc() : "unknown"
         };
 
-        loadedPlugins_[std::string(name)] = info;
-
-        return std::cref(loadedPlugins_[std::string(name)]);
+        loadedPlugins_[pluginName] = info;
+        return std::cref(loadedPlugins_[pluginName]);
     }
 };
 
-} // namespace portfolio
+}  // namespace portfolio

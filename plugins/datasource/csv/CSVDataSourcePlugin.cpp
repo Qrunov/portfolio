@@ -1,6 +1,7 @@
 #include "CSVDataSource.hpp"
 #include <iostream>
 #include <cstring>
+#include <boost/program_options.hpp>
 
 #ifdef _WIN32
 #define PLUGIN_API __declspec(dllexport)
@@ -8,35 +9,86 @@
 #define PLUGIN_API __attribute__((visibility("default")))
 #endif
 
+namespace po = boost::program_options;
+
 extern "C" {
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Plugin Export Functions
+// Command Line Options Metadata
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Функция для получения опций командной строки плагина
+// Возвращает указатель на статически размещенный options_description
+// Вызывающая сторона НЕ должна удалять возвращенный указатель
+PLUGIN_API const po::options_description* getCommandLineOptions() {
+    static po::options_description* csvOptions = nullptr;
+
+    if (!csvOptions) {
+        csvOptions = new po::options_description("CSV DataSource Options");
+        csvOptions->add_options()
+            ("csv-file", po::value<std::string>()->required(),
+             "Path to CSV file")
+
+            ("csv-delimiter", po::value<char>()->default_value(','),
+             "CSV delimiter character (default: ',')")
+
+            ("csv-skip-header", po::value<bool>()->default_value(true),
+             "Skip first line as header (default: true)")
+
+            ("csv-date-format", po::value<std::string>()->default_value("%Y-%m-%d"),
+             "Date format string (default: %Y-%m-%d)")
+
+            ("csv-date-column", po::value<std::size_t>()->default_value(1),
+             "Date column index, 1-based (default: 1)");
+    }
+
+    return csvOptions;
+}
+
+// Получить краткое описание плагина
+PLUGIN_API const char* getPluginDescription() {
+    return "Load financial data from CSV (Comma-Separated Values) files";
+}
+
+// Получить примеры использования
+// Возвращает строку с несколькими примерами, разделенными '\n'
+PLUGIN_API const char* getPluginExamples() {
+    return
+        "# Basic CSV loading:\n"
+        "portfolio load --source csv --csv-file data.csv -t SBER -n Sberbank -s MOEX -m Close:2 --db inmemory_db\n"
+        "\n"
+        "# CSV with semicolon delimiter:\n"
+        "portfolio load --source csv --csv-file data.csv --csv-delimiter ';' -t GAZP -n Gazprom -s MOEX -m Close:2 --db inmemory_db\n"
+        "\n"
+        "# CSV without header:\n"
+        "portfolio load --source csv --csv-file data.csv --csv-skip-header false -t TEST -n Test -s TEST -m Value:2 --db inmemory_db";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Plugin Creation Functions
 // ═══════════════════════════════════════════════════════════════════════════════
 
 PLUGIN_API portfolio::IDataSource* createDataSource(const char* config) {
     try {
-        // Парсим конфигурацию
+        // Парсим конфигурацию (для обратной совместимости)
         // Формат: "delimiter=';',skipHeader=true,dateFormat=%Y-%m-%d"
-        // Или пустая строка для значений по умолчанию
-        
+
         char delimiter = ',';
         bool skipHeader = true;
         std::string dateFormat = "%Y-%m-%d";
 
         if (config && std::strlen(config) > 0) {
             std::string configStr(config);
-            
-            // Простой парсинг конфигурации
+
             auto parseParam = [&configStr](const std::string& key) -> std::string {
                 std::size_t pos = configStr.find(key + "=");
                 if (pos == std::string::npos) {
                     return "";
                 }
-                
+
                 std::size_t start = pos + key.length() + 1;
                 std::size_t end = configStr.find(',', start);
-                
+
                 if (end == std::string::npos) {
                     return configStr.substr(start);
                 }
@@ -59,16 +111,14 @@ PLUGIN_API portfolio::IDataSource* createDataSource(const char* config) {
             }
         }
 
-        // Создаём реальный FileReader
         auto fileReader = std::make_shared<portfolio::FileReader>();
-        
-        // Создаём CSVDataSource с заданными параметрами
+
         return new portfolio::CSVDataSource(
             fileReader,
             delimiter,
             skipHeader,
             dateFormat
-        );
+            );
 
     } catch (const std::exception& e) {
         std::cerr << "Failed to create CSVDataSource: " << e.what() << std::endl;
@@ -80,16 +130,25 @@ PLUGIN_API void destroyDataSource(portfolio::IDataSource* dataSource) {
     delete dataSource;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Plugin Metadata Functions
+// ═══════════════════════════════════════════════════════════════════════════════
+
 PLUGIN_API const char* getPluginName() {
     return "CSVDataSource";
 }
 
 PLUGIN_API const char* getPluginVersion() {
-    return "1.0.0";
+    return "2.0.0";  // Обновлена версия с поддержкой CLI options
 }
 
 PLUGIN_API const char* getPluginType() {
     return "datasource";
 }
 
-} // extern "C"
+// Получить системное имя плагина (используется в --source)
+PLUGIN_API const char* getPluginSystemName() {
+    return "csv";
+}
+
+}  // extern "C"

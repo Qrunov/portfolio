@@ -85,6 +85,10 @@ private:
 
     std::expected<std::size_t, std::string> parseColumnIndex(
         std::string_view indexStr) const;
+
+    // Обработка маппингов из опций командной строки
+    Result processMappingsFromOptions(
+        const boost::program_options::variables_map& options);
 };
 
 }  // namespace portfolio

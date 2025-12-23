@@ -1880,16 +1880,30 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
             "Use 'portfolio load --help' for usage.");
     }
 
-    std::string instrumentId = instrumentIdResult.value();
-    std::string name = nameResult.value();
-    std::string sourceName = sourceNameResult.value();
-    std::string type = cmd.options.at("type").as<std::string>();
+    const std::string& instrumentId = *instrumentIdResult;
+    const std::string& name = *nameResult;
+    const std::string& sourceName = *sourceNameResult;
+
+    std::string instrumentType = "stock";
+    if (cmd.options.count("type")) {
+        instrumentType = cmd.options.at("type").as<std::string>();
+    }
 
     // ═════════════════════════════════════════════════════════════════════════
     // Шаг 3: Инициализация базы данных
     // ═════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = cmd.options.at("db").as<std::string>();
+    auto dbTypeResult = getRequiredOption<std::string>(cmd, "db");
+    if (!dbTypeResult) {
+        return std::unexpected(
+            "Database type not specified.\n"
+            "Use --db <type> to specify database type.\n"
+            "Available types: inmemory_db, sqlite_db\n"
+            "Use 'portfolio plugin list database' to see all available database plugins.");
+    }
+
+    const std::string& dbType = *dbTypeResult;
+
     std::string dbPath;
     if (cmd.options.count("db-path")) {
         dbPath = cmd.options.at("db-path").as<std::string>();
@@ -1900,22 +1914,22 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
         return std::unexpected(dbResult.error());
     }
 
+    std::cout << "✓ Database initialized (" << dbType << ")" << std::endl;
+
     // ═════════════════════════════════════════════════════════════════════════
-    // Шаг 4: Вывод информации о загрузке
+    // Шаг 4: Сохранение инструмента в базе
     // ═════════════════════════════════════════════════════════════════════════
 
-    std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "Loading Data Using Data Source Plugin" << std::endl;
-    std::cout << std::string(70, '=') << std::endl;
-    std::cout << "Database type:       " << dbType << std::endl;
-    if (!dbPath.empty()) {
-        std::cout << "Database path:       " << dbPath << std::endl;
+    auto saveInstResult = database_->saveInstrument(
+        instrumentId, name, instrumentType, sourceName);
+
+    if (!saveInstResult) {
+        return std::unexpected(
+            "Failed to save instrument: " + saveInstResult.error());
     }
-    std::cout << "Data source plugin:  " << pluginName << std::endl;
-    if (isLegacyMode) {
-        std::cout << "Mode:                Legacy (--file)" << std::endl;
-    }
-    std::cout << std::endl;
+
+    std::cout << "✓ Instrument saved: " << instrumentId
+              << " (" << name << ")" << std::endl;
 
     // ═════════════════════════════════════════════════════════════════════════
     // Шаг 5: Загрузка плагина источника данных
@@ -1937,7 +1951,7 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
 
     po::variables_map pluginOptions = cmd.options;
 
-    // Обратная совместимость: преобразуем --file в --csv-file
+    // Обратная совместимость: преобразуем --file в --csv-file и --map в --csv-map
     if (isLegacyMode && cmd.options.count("file")) {
         std::string filePath = cmd.options.at("file").as<std::string>();
         pluginOptions.insert({"csv-file",
@@ -1960,6 +1974,12 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
             pluginOptions.insert({"csv-date-column",
                                   cmd.options.at("date-column")});
         }
+
+        // НОВОЕ: преобразуем --map в --csv-map для обратной совместимости
+        if (cmd.options.count("map")) {
+            pluginOptions.insert({"csv-map",
+                                  cmd.options.at("map")});
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1973,57 +1993,77 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
     }
 
     std::cout << "✓ Data source initialized from command line options" << std::endl;
-    std::cout << std::endl;
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Шаг 8: Добавление запросов атрибутов
+    // Шаг 8: Добавление запросов атрибутов (если не обработаны плагином)
     // ═════════════════════════════════════════════════════════════════════════
 
-    if (!cmd.options.count("map")) {
-        return std::unexpected(
-            "No attribute mappings specified.\n"
-            "Use -m or --map to specify attribute mappings.\n"
-            "Example: -m Close:2 -m Volume:3");
+    // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Проверяем, были ли маппинги обработаны плагином
+    // Проверяем наличие --csv-map в опциях для CSV плагина
+    bool mappingsProcessedByPlugin = false;
+
+    if (pluginName == "csv" && pluginOptions.count("csv-map")) {
+        // CSV плагин обработал маппинги через --csv-map в initializeFromOptions()
+        mappingsProcessedByPlugin = true;
+        std::cout << "✓ Attribute mappings processed by plugin" << std::endl;
     }
 
-    auto mappings = cmd.options.at("map").as<std::vector<std::string>>();
-
-    std::cout << "Attribute mappings:" << std::endl;
-    for (const auto& mapping : mappings) {
-        std::size_t pos = mapping.find(':');
-        if (pos == std::string::npos) {
+    // Если плагин не обработал маппинги, обрабатываем их здесь (legacy mode)
+    if (!mappingsProcessedByPlugin) {
+        if (!cmd.options.count("map") && !pluginOptions.count("csv-map")) {
             return std::unexpected(
-                "Invalid mapping format: " + mapping +
-                ". Expected 'attribute:source'");
+                "No attribute mappings specified.\n"
+                "For CSV plugin, use --csv-map:\n"
+                "  --csv-map Close:2 --csv-map Volume:3\n"
+                "Legacy syntax with --map is also supported:\n"
+                "  -m Close:2 -m Volume:3");
         }
 
-        std::string attrName = mapping.substr(0, pos);
-        std::string sourceSpec = mapping.substr(pos + 1);
+        // Получаем маппинги (из --map или --csv-map)
+        std::vector<std::string> mappings;
+        if (cmd.options.count("map")) {
+            mappings = cmd.options.at("map").as<std::vector<std::string>>();
+        } else if (pluginOptions.count("csv-map")) {
+            mappings = pluginOptions.at("csv-map").as<std::vector<std::string>>();
+        }
 
-        // Для CSV плагина конвертируем 1-based в 0-based
-        if (pluginName == "csv") {
-            try {
-                std::size_t columnNum = std::stoull(sourceSpec);
-                if (columnNum == 0) {
-                    return std::unexpected(
-                        "Column index must be >= 1 in mapping: " + mapping);
-                }
-                columnNum--;  // Convert to 0-based
-                sourceSpec = std::to_string(columnNum);
-            } catch (...) {
+        std::cout << "Attribute mappings:" << std::endl;
+        for (const auto& mapping : mappings) {
+            std::size_t pos = mapping.find(':');
+            if (pos == std::string::npos) {
                 return std::unexpected(
-                    "Invalid column number in mapping '" + mapping + "'");
+                    "Invalid mapping format: " + mapping +
+                    ". Expected 'attribute:source'");
             }
-        }
 
-        auto addResult = dataSource->addAttributeRequest(attrName, sourceSpec);
-        if (!addResult) {
-            return std::unexpected(
-                "Failed to add attribute request for '" + attrName +
-                "': " + addResult.error());
-        }
+            std::string attrName = mapping.substr(0, pos);
+            std::string sourceSpec = mapping.substr(pos + 1);
 
-        std::cout << "  " << attrName << " -> " << sourceSpec << std::endl;
+            // Для CSV плагина конвертируем 1-based в 0-based
+            if (pluginName == "csv") {
+                try {
+                    std::size_t columnNum = std::stoull(sourceSpec);
+                    if (columnNum == 0) {
+                        return std::unexpected(
+                            "Column index must be >= 1 in mapping: " + mapping);
+                    }
+                    columnNum--;  // Convert to 0-based
+                    sourceSpec = std::to_string(columnNum);
+                } catch (...) {
+                    return std::unexpected(
+                        "Invalid column number in mapping '" + mapping + "'");
+                }
+            }
+
+            auto addResult = dataSource->addAttributeRequest(attrName, sourceSpec);
+            if (!addResult) {
+                return std::unexpected(
+                    "Failed to add attribute request for '" + attrName +
+                    "': " + addResult.error());
+            }
+
+            std::cout << "  " << attrName << " -> " << sourceSpec << std::endl;
+        }
     }
 
     std::cout << std::endl;
@@ -2042,52 +2082,31 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
 
     const auto& extractedData = extractResult.value();
 
-    std::cout << "✓ Data extracted successfully" << std::endl;
-    std::cout << "  Total attributes: " << extractedData.size() << std::endl;
-
-    for (const auto& [attrName, timeSeries] : extractedData) {
-        std::cout << "  " << attrName << ": " << timeSeries.size()
-        << " data points" << std::endl;
+    if (extractedData.empty()) {
+        return std::unexpected("No data extracted from source");
     }
 
+    std::cout << "✓ Data extracted: " << extractedData.size()
+              << " attribute(s)" << std::endl;
     std::cout << std::endl;
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Шаг 10: Сохранение в базу данных
+    // Шаг 10: Сохранение временных рядов в базу данных
     // ═════════════════════════════════════════════════════════════════════════
 
-    std::cout << "Saving to database..." << std::endl;
-
-    if (!database_) {
-        return std::unexpected("Database not initialized");
-    }
-
-    auto addInstrumentResult = database_->saveInstrument(
-        instrumentId,
-        name,
-        type,
-        "");
-
-    if (!addInstrumentResult) {
-        return std::unexpected(
-            "Failed to add instrument: " + addInstrumentResult.error());
-    }
-
-    std::cout << "✓ Instrument added: " << instrumentId << std::endl;
+    std::cout << "Saving time series to database..." << std::endl;
 
     std::size_t totalSaved = 0;
 
     for (const auto& [attrName, timeSeries] : extractedData) {
+        // ИСПРАВЛЕНИЕ: используем saveAttributes вместо saveTimeSeries
         auto saveResult = database_->saveAttributes(
-            instrumentId,
-            sourceName,
-            attrName,
-            timeSeries);
+            instrumentId, attrName, sourceName, timeSeries);
 
         if (!saveResult) {
-            std::cerr << "Warning: Failed to save attribute '" << attrName
-                      << "': " << saveResult.error() << std::endl;
-            continue;
+            return std::unexpected(
+                "Failed to save time series for attribute '" + attrName +
+                "': " + saveResult.error());
         }
 
         totalSaved += timeSeries.size();
@@ -2113,9 +2132,6 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
 
     return {};
 }
-
-
-
 
 
 std::expected<void, std::string> CommandExecutor::executePlugins(const ParsedCommand& cmd) {

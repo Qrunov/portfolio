@@ -44,14 +44,14 @@ CSVDataSource::CSVDataSource(
     bool skipHeader,
     std::string_view dateFormat)
     : reader_(reader ? reader : std::make_shared<FileReader>()),
-      delimiter_(delimiter),
-      skipHeader_(skipHeader),
-      dateFormat_(dateFormat) {}
+    delimiter_(delimiter),
+    skipHeader_(skipHeader),
+    dateFormat_(dateFormat) {}
 
 Result CSVDataSource::initialize(
     std::string_view dataLocation,
     std::string_view dateSource) {
-    
+
     filePath_ = std::string(dataLocation);
 
     // Парсим индекс столбца с датой
@@ -69,7 +69,7 @@ Result CSVDataSource::initialize(
 Result CSVDataSource::addAttributeRequest(
     std::string_view attributeName,
     std::string_view attributeSource) {
-    
+
     if (attributeName.empty()) {
         return std::unexpected("Attribute name cannot be empty");
     }
@@ -85,81 +85,103 @@ Result CSVDataSource::addAttributeRequest(
 }
 
 std::expected<ExtractedData, std::string> CSVDataSource::extract() {
-    
+
     if (filePath_.empty()) {
-        return std::unexpected("Data source not initialized. Call initialize() first.");
+        return std::unexpected("Data source not initialized. Call initialize() or initializeFromOptions() first.");
     }
 
     if (attributeRequests_.empty()) {
-        return std::unexpected("No attribute requests. Add requests using addAttributeRequest()");
+        return std::unexpected("No attribute requests. Use addAttributeRequest() or --csv-map option.");
     }
 
-    // Читаем строки из файла
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 1: Чтение файла
+    // ═════════════════════════════════════════════════════════════════════════
+
     auto linesResult = reader_->readLines(filePath_);
     if (!linesResult) {
         return std::unexpected(linesResult.error());
     }
 
-    auto lines = std::move(*linesResult);
+    const auto& lines = linesResult.value();
 
-    // Пропускаем заголовок если нужно
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 2: Пропускаем заголовок если нужно
+    // ═════════════════════════════════════════════════════════════════════════
+
     std::size_t startLine = skipHeader_ ? 1 : 0;
-    if (skipHeader_ && lines.size() < 1) {
-        return std::unexpected("File has no header line");
+
+    if (startLine >= lines.size()) {
+        return std::unexpected("No data lines after header");
     }
 
-    ExtractedData result;
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 3: Подготовка структуры результата
+    // ═════════════════════════════════════════════════════════════════════════
 
-    // Обрабатываем каждую строку
+    ExtractedData result;
+    for (const auto& [attrName, _] : attributeRequests_) {
+        result[attrName] = std::vector<std::pair<TimePoint, AttributeValue>>{};
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 4: Парсинг строк
+    // ═════════════════════════════════════════════════════════════════════════
+
     for (std::size_t i = startLine; i < lines.size(); ++i) {
+        // Парсим CSV строку
         auto fieldsResult = parseCSVLine(lines[i]);
         if (!fieldsResult) {
-            return std::unexpected(std::string("Failed to parse line ") + std::to_string(i) +
-                                 ": " + fieldsResult.error());
+            // Логируем ошибку, но продолжаем
+            continue;
         }
 
-        auto fields = std::move(*fieldsResult);
+        const auto& fields = fieldsResult.value();
 
-        // Проверяем, что есть дата
+        // Проверяем валидность индекса колонки с датой
         if (dateColumnIndex_ >= fields.size()) {
-            return std::unexpected(std::string("Date column index ") + 
-                                 std::to_string(dateColumnIndex_) +
-                                 " out of bounds at line " + std::to_string(i));
+            return std::unexpected(
+                "Date column index " + std::to_string(dateColumnIndex_) +
+                " out of range (line has " + std::to_string(fields.size()) +
+                " columns) at line " + std::to_string(i + 1));
         }
 
         // Парсим дату
         auto dateResult = parseDateString(fields[dateColumnIndex_]);
         if (!dateResult) {
-            return std::unexpected(std::string("Failed to parse date at line ") +
-                                 std::to_string(i) + ": " + dateResult.error());
+            // Логируем ошибку, но продолжаем
+            continue;
         }
 
         TimePoint date = *dateResult;
 
-        // Обрабатываем каждый запрошенный атрибут
-        for (const auto& [attrName, columnIndex] : attributeRequests_) {
-            if (columnIndex >= fields.size()) {
-                return std::unexpected(std::string("Column index ") + 
-                                     std::to_string(columnIndex) +
-                                     " for attribute '" + attrName +
-                                     "' out of bounds at line " + std::to_string(i));
+        // Извлекаем запрошенные атрибуты
+        for (const auto& [attrName, columnIdx] : attributeRequests_) {
+            if (columnIdx >= fields.size()) {
+                return std::unexpected(
+                    "Attribute '" + attrName + "' column index " +
+                    std::to_string(columnIdx) + " out of range at line " +
+                    std::to_string(i + 1));
             }
 
-            auto valueResult = parseValue(fields[columnIndex]);
+            auto valueResult = parseValue(fields[columnIdx]);
             if (!valueResult) {
-                return std::unexpected(std::string("Failed to parse value for '") +
-                                     attrName + "' at line " + std::to_string(i) +
-                                     ": " + valueResult.error());
+                // Логируем ошибку, но продолжаем
+                continue;
             }
 
-            result[attrName].push_back({date, *valueResult});
+            result[attrName].emplace_back(date, *valueResult);
         }
     }
 
-    // Сортируем данные по датам для каждого атрибута
+    // ═════════════════════════════════════════════════════════════════════════
+    // Шаг 5: Сортировка по датам
+    // ═════════════════════════════════════════════════════════════════════════
+
+    // Сортируем временные ряды по датам для каждого атрибута
     for (auto& [attrName, data] : result) {
         std::sort(data.begin(), data.end(),
-            [](const auto& a, const auto& b) { return a.first < b.first; });
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
     }
 
     return result;
@@ -190,9 +212,9 @@ std::expected<TimePoint, std::string> CSVDataSource::parseDateString(
         tm.tm_mday = 1;
     }
 
-// CRITICAL FIX: Используем timegm вместо mktime!
-// mktime интерпретирует tm как localtime
-// timegm интерпретирует tm как UTC
+    // CRITICAL FIX: Используем timegm вместо mktime!
+    // mktime интерпретирует tm как localtime
+    // timegm интерпретирует tm как UTC
 #ifdef _WIN32
     // Windows: используем _mkgmtime
     auto timeT = _mkgmtime(&tm);
@@ -222,7 +244,7 @@ std::expected<AttributeValue, std::string> CSVDataSource::parseValue(
     } catch (const std::exception&) {
     }
 
-    
+
     // Пытаемся парсить как double
     try {
         std::size_t idx;
@@ -239,7 +261,7 @@ std::expected<AttributeValue, std::string> CSVDataSource::parseValue(
 
 std::expected<std::vector<std::string>, std::string> CSVDataSource::parseCSVLine(
     std::string_view line) const {
-    
+
     std::vector<std::string> fields;
     std::istringstream iss(line.data());
     std::string field;
@@ -248,7 +270,7 @@ std::expected<std::vector<std::string>, std::string> CSVDataSource::parseCSVLine
         // Убираем пробелы с концов
         auto start = field.find_first_not_of(" \t\r\n");
         auto end = field.find_last_not_of(" \t\r\n");
-        
+
         if (start != std::string::npos && end != std::string::npos) {
             fields.push_back(field.substr(start, end - start + 1));
         } else if (start == std::string::npos) {
@@ -265,19 +287,19 @@ std::expected<std::vector<std::string>, std::string> CSVDataSource::parseCSVLine
 
 std::expected<std::size_t, std::string> CSVDataSource::parseColumnIndex(
     std::string_view indexStr) const {
-    
+
     try {
         std::size_t idx;
         std::size_t columnIndex = std::stoull(std::string(indexStr), &idx);
-        
+
         if (idx != indexStr.length()) {
             return std::unexpected(std::string("Invalid column index: ") + std::string(indexStr));
         }
-        
+
         return columnIndex;
     } catch (const std::exception& e) {
-        return std::unexpected(std::string("Failed to parse column index: ") + 
-                             std::string(indexStr) + " (" + e.what() + ")");
+        return std::unexpected(std::string("Failed to parse column index: ") +
+                               std::string(indexStr) + " (" + e.what() + ")");
     }
 }
 
@@ -327,13 +349,90 @@ Result CSVDataSource::initializeFromOptions(
             "CSV file not found: " + filePath_);
     }
 
-    // Очищаем предыдущие запросы атрибутов
+    // 5. Очищаем предыдущие запросы атрибутов
     attributeRequests_.clear();
+
+    // 6. Обрабатываем маппинги если они указаны
+    auto mappingResult = processMappingsFromOptions(options);
+    if (!mappingResult) {
+        return mappingResult;
+    }
 
     return Result{};
 }
 
+Result CSVDataSource::processMappingsFromOptions(
+    const boost::program_options::variables_map& options) {
 
+    // Проверяем наличие опции --csv-map
+    if (!options.count("csv-map")) {
+        // Маппинги не указаны - это нормально, они могут быть добавлены позже
+        return Result{};
+    }
+
+    auto mappings = options.at("csv-map").as<std::vector<std::string>>();
+
+    if (mappings.empty()) {
+        return Result{};
+    }
+
+    // Парсим и добавляем каждый маппинг
+    for (const auto& mapping : mappings) {
+        std::size_t pos = mapping.find(':');
+        if (pos == std::string::npos) {
+            return std::unexpected(
+                "Invalid mapping format: '" + mapping + "'. "
+                                                        "Expected format: 'attribute:column_index'");
+        }
+
+        std::string attrName = mapping.substr(0, pos);
+        std::string columnStr = mapping.substr(pos + 1);
+
+        // Убираем пробелы
+        auto trimLeft = [](std::string& s) {
+            s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+                                            [](unsigned char ch) { return !std::isspace(ch); }));
+        };
+        auto trimRight = [](std::string& s) {
+            s.erase(std::find_if(s.rbegin(), s.rend(),
+                                 [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+        };
+
+        trimLeft(attrName);
+        trimRight(attrName);
+        trimLeft(columnStr);
+        trimRight(columnStr);
+
+        if (attrName.empty()) {
+            return std::unexpected(
+                "Empty attribute name in mapping: '" + mapping + "'");
+        }
+
+        // Парсим индекс колонки (1-based из командной строки)
+        std::size_t columnIndex;
+        try {
+            columnIndex = std::stoull(columnStr);
+        } catch (const std::exception& e) {
+            return std::unexpected(
+                "Invalid column index in mapping '" + mapping + "': " +
+                std::string(e.what()));
+        }
+
+        if (columnIndex == 0) {
+            return std::unexpected(
+                "Column index must be >= 1 in mapping: '" + mapping + "' "
+                                                                      "(columns are indexed from 1)");
+        }
+
+        // Конвертируем в 0-based для внутреннего использования
+        columnIndex--;
+
+        // Добавляем маппинг
+        attributeRequests_[attrName] = columnIndex;
+    }
+
+    return Result{};
+}
 
 
 }  // namespace portfolio

@@ -82,8 +82,8 @@ public:
     // DEPRECATED: Используйте initializeFromOptions вместо этого
     [[deprecated("Use initializeFromOptions instead")]]
     virtual Result initialize(
-        std::string_view dataLocation,
-        std::string_view dateSource) {
+        [[maybe_unused]] std::string_view dataLocation,
+        [[maybe_unused]] std::string_view dateSource) {
         return std::unexpected("Legacy initialize() not supported by this plugin");
     }
 };

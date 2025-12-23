@@ -39,7 +39,13 @@ PLUGIN_API const po::options_description* getCommandLineOptions() {
              "Date format string (default: %Y-%m-%d)")
 
             ("csv-date-column", po::value<std::size_t>()->default_value(1),
-             "Date column index, 1-based (default: 1)");
+             "Date column index, 1-based (default: 1)")
+
+            ("csv-map", po::value<std::vector<std::string>>()->multitoken(),
+             "Attribute mapping (attribute:column_index). "
+             "Column indices are 1-based. "
+             "Can be specified multiple times. "
+             "Example: --csv-map Close:2 --csv-map Volume:3");
     }
 
     return csvOptions;
@@ -54,14 +60,29 @@ PLUGIN_API const char* getPluginDescription() {
 // Возвращает строку с несколькими примерами, разделенными '\n'
 PLUGIN_API const char* getPluginExamples() {
     return
-        "# Basic CSV loading:\n"
-        "portfolio load --source csv --csv-file data.csv -t SBER -n Sberbank -s MOEX -m Close:2 --db inmemory_db\n"
+        "# Basic CSV loading with mappings:\n"
+        "portfolio load --source csv --csv-file data.csv "
+        "-t SBER -n Sberbank -s MOEX "
+        "--csv-map Close:2 --csv-map Volume:3 "
+        "--db inmemory_db\n"
         "\n"
         "# CSV with semicolon delimiter:\n"
-        "portfolio load --source csv --csv-file data.csv --csv-delimiter ';' -t GAZP -n Gazprom -s MOEX -m Close:2 --db inmemory_db\n"
+        "portfolio load --source csv --csv-file data.csv --csv-delimiter ';' "
+        "-t GAZP -n Gazprom -s MOEX "
+        "--csv-map Close:2 --csv-map Volume:3 "
+        "--db inmemory_db\n"
         "\n"
         "# CSV without header:\n"
-        "portfolio load --source csv --csv-file data.csv --csv-skip-header false -t TEST -n Test -s TEST -m Value:2 --db inmemory_db";
+        "portfolio load --source csv --csv-file data.csv --csv-skip-header false "
+        "-t TEST -n Test -s TEST "
+        "--csv-map Value:2 "
+        "--db inmemory_db\n"
+        "\n"
+        "# Legacy mode (backward compatibility):\n"
+        "portfolio load --file data.csv "
+        "-t SBER -n Sberbank -s MOEX "
+        "-m Close:2 -m Volume:3 "
+        "--db inmemory_db";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -139,7 +160,7 @@ PLUGIN_API const char* getPluginName() {
 }
 
 PLUGIN_API const char* getPluginVersion() {
-    return "2.0.0";  // Обновлена версия с поддержкой CLI options
+    return "2.1.0";  // Обновлена версия с поддержкой --csv-map
 }
 
 PLUGIN_API const char* getPluginType() {

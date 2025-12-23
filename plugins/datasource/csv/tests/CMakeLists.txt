@@ -18,6 +18,7 @@ portfolio_add_test(
 portfolio_add_test(
     NAME csv_datasource
     SOURCES test_csv_datasource.cpp
+    LIBRARIES csv_datasource_impl
 )
 
 

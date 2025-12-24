@@ -2485,12 +2485,91 @@ std::expected<void, std::string> CommandExecutor::executePluginList(
     return {};
 }
 
+// Helper-функция для вывода информации о плагине (добавить ПЕРЕД executePluginInfo)
+template<typename PluginInterface>
+bool printPluginInfoIfFound(
+    const std::string& pluginName,
+    const std::string& displayTypeName,
+    PluginManager<PluginInterface>* manager)
+{
+    auto plugins = manager->scanAvailablePlugins();
+
+    for (const auto& plugin : plugins) {
+        if (plugin.name == pluginName || plugin.systemName == pluginName) {
+            // ════════════════════════════════════════════════════════════
+            // Найден! Выводим информацию
+            // ════════════════════════════════════════════════════════════
+
+            std::cout << "\n" << std::string(70, '=') << std::endl;
+            std::cout << displayTypeName << " PLUGIN: "
+                      << plugin.displayName << " v" << plugin.version << std::endl;
+            std::cout << std::string(70, '=') << std::endl;
+            std::cout << "System name: " << plugin.systemName << std::endl;
+            std::cout << "Type:        " << plugin.type << std::endl;
+            std::cout << "Path:        " << plugin.path << std::endl;
+
+            if (!plugin.description.empty()) {
+                std::cout << "\nDescription:\n  " << plugin.description << std::endl;
+            }
+
+            // ════════════════════════════════════════════════════════════
+            // Получаем и показываем опции командной строки
+            // ════════════════════════════════════════════════════════════
+
+            auto metadataResult = manager->getPluginCommandLineMetadata(pluginName);
+            if (metadataResult && metadataResult->commandLineOptions) {
+                std::cout << "\n" << std::string(70, '-') << std::endl;
+                std::cout << "COMMAND LINE OPTIONS:" << std::endl;
+                std::cout << std::string(70, '-') << std::endl;
+
+                // Выводим опции
+                std::ostringstream oss;
+                oss << *metadataResult->commandLineOptions;
+
+                // Форматируем вывод с отступами
+                std::string optionsStr = oss.str();
+                std::istringstream iss(optionsStr);
+                std::string line;
+                while (std::getline(iss, line)) {
+                    if (!line.empty()) {
+                        std::cout << "  " << line << std::endl;
+                    }
+                }
+            }
+
+            // ════════════════════════════════════════════════════════════
+            // Примеры использования
+            // ════════════════════════════════════════════════════════════
+
+            if (!plugin.examples.empty()) {
+                std::cout << "\n" << std::string(70, '-') << std::endl;
+                std::cout << "EXAMPLES:" << std::endl;
+                std::cout << std::string(70, '-') << std::endl;
+                for (const auto& example : plugin.examples) {
+                    if (!example.empty() && example[0] == '#') {
+                        std::cout << "  " << example << std::endl;
+                    } else {
+                        std::cout << "  $ " << example << std::endl;
+                    }
+                }
+            }
+
+            std::cout << std::string(70, '=') << std::endl << std::endl;
+
+            return true;  // Плагин найден и выведен
+        }
+    }
+
+    return false;  // Плагин не найден
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 
 std::expected<void, std::string> CommandExecutor::executePluginInfo(
     const ParsedCommand& cmd)
 {
     // ════════════════════════════════════════════════════════════════════════
-    // Получение имени плагина из аргументов
+    // Получение имени плагина из аргументов (позиционный или --name)
     // ════════════════════════════════════════════════════════════════════════
 
     std::string pluginName;
@@ -2514,133 +2593,48 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
             "Use 'portfolio plugin list' to see available plugins.");
     }
 
-    struct PluginInfo {
-        std::string name;
-        std::string displayName;
-        std::string systemName;
-        std::string version;
-        std::string type;
-        std::string path;
-        bool found = false;
-    };
-
-    PluginInfo plugin;
-
-    // Ищем в database плагинах
-    auto databasePlugins = databasePluginManager_->scanAvailablePlugins();
-    for (const auto& p : databasePlugins) {
-        if (p.name == pluginName || p.systemName == pluginName || p.displayName == pluginName) {
-            plugin.name = p.name;
-            plugin.displayName = p.displayName;
-            plugin.systemName = p.systemName;
-            plugin.version = p.version;
-            plugin.type = p.type;
-            plugin.path = p.path;
-            plugin.found = true;
-            break;
-        }
-    }
-
-    // Если не нашли, ищем в strategy плагинах
-    if (!plugin.found) {
-        auto strategyPlugins = strategyPluginManager_->scanAvailablePlugins();
-        for (const auto& p : strategyPlugins) {
-            if (p.name == pluginName || p.systemName == pluginName || p.displayName == pluginName) {
-                plugin.name = p.name;
-                plugin.displayName = p.displayName;
-                plugin.systemName = p.systemName;
-                plugin.version = p.version;
-                plugin.type = p.type;
-                plugin.path = p.path;
-                plugin.found = true;
-                break;
-            }
-        }
-    }
-
-    // Если не нашли, ищем в datasource плагинах
-    if (!plugin.found) {
-        auto datasourcePlugins = dataSourcePluginManager_->scanAvailablePlugins();
-        for (const auto& p : datasourcePlugins) {
-            if (p.name == pluginName || p.systemName == pluginName || p.displayName == pluginName) {
-                plugin.name = p.name;
-                plugin.displayName = p.displayName;
-                plugin.systemName = p.systemName;
-                plugin.version = p.version;
-                plugin.type = p.type;
-                plugin.path = p.path;
-                plugin.found = true;
-                break;
-            }
-        }
-    }
-
-    // Если плагин не найден
-    if (!plugin.found) {
-        return std::unexpected(
-            "Plugin '" + pluginName + "' not found.\n"
-                                      "Use 'portfolio plugin list' to see available plugins.");
+    // Определяем тип плагина (опционально)
+    std::string pluginType;
+    if (cmd.options.count("type")) {
+        pluginType = cmd.options.at("type").as<std::string>();
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Вывод информации о плагине
+    // Поиск плагина во всех менеджерах
     // ════════════════════════════════════════════════════════════════════════
 
-    // Красиво форматируем тип
-    std::string typeTitle = plugin.type;
-    if (!typeTitle.empty()) {
-        typeTitle[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(typeTitle[0])));
+    bool found = false;
+
+    // Пробуем Database плагины
+    if (!found && (pluginType.empty() || pluginType == "database")) {
+        found = printPluginInfoIfFound(
+            pluginName,
+            "DATABASE",
+            databasePluginManager_.get()
+            );
     }
 
-    std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "PLUGIN INFORMATION" << std::endl;
-    std::cout << std::string(70, '=') << std::endl << std::endl;
-
-    // Основная информация
-    std::cout << "Display Name:  " << plugin.displayName << std::endl;
-    std::cout << "System Name:   " << plugin.systemName << std::endl;
-    std::cout << "File Name:     " << plugin.name << std::endl;
-    std::cout << "Version:       " << plugin.version << std::endl;
-    std::cout << "Type:          " << typeTitle << std::endl;
-    std::cout << std::endl;
-
-    // Информация о пути
-    std::cout << "Location:" << std::endl;
-    std::cout << "  Path:        " << plugin.path << std::endl;
-
-    // Проверяем существование файла
-    std::filesystem::path pluginPath(plugin.path);
-    if (std::filesystem::exists(pluginPath)) {
-        std::cout << "  Status:      ✓ File exists" << std::endl;
-
-        // Размер файла
-        auto fileSize = std::filesystem::file_size(pluginPath);
-        std::cout << "  Size:        ";
-        if (fileSize < 1024) {
-            std::cout << fileSize << " bytes";
-        } else if (fileSize < 1024 * 1024) {
-            std::cout << std::fixed << std::setprecision(1)
-            << (static_cast<double>(fileSize) / 1024.0) << " KB";
-        } else {
-            std::cout << std::fixed << std::setprecision(2)
-            << (static_cast<double>(fileSize) / (1024.0 * 1024.0)) << " MB";
-        }
-        std::cout << std::endl;
-
-        // Время последней модификации
-        auto lastWrite = std::filesystem::last_write_time(pluginPath);
-        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-            lastWrite - std::filesystem::file_time_type::clock::now() +
-            std::chrono::system_clock::now());
-        std::time_t cftime = std::chrono::system_clock::to_time_t(sctp);
-        std::cout << "  Modified:    " << std::put_time(std::localtime(&cftime), "%Y-%m-%d %H:%M:%S")
-                  << std::endl;
-    } else {
-        std::cout << "  Status:      ✗ File not found" << std::endl;
+    // Пробуем DataSource плагины
+    if (!found && (pluginType.empty() || pluginType == "datasource")) {
+        found = printPluginInfoIfFound(
+            pluginName,
+            "DATASOURCE",
+            dataSourcePluginManager_.get()
+            );
     }
 
-    std::cout << std::endl;
-    std::cout << std::string(70, '=') << std::endl << std::endl;
+    // Пробуем Strategy плагины
+    if (!found && (pluginType.empty() || pluginType == "strategy")) {
+        found = printPluginInfoIfFound(
+            pluginName,
+            "STRATEGY",
+            strategyPluginManager_.get()
+            );
+    }
+
+    if (!found) {
+        return std::unexpected("Plugin not found: " + pluginName);
+    }
 
     return {};
 }

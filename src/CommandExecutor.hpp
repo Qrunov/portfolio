@@ -20,10 +20,14 @@ public:
 
     std::expected<void, std::string> execute(const ParsedCommand& cmd);
     // Database initialization
-    std::expected<void, std::string> ensureDatabase(
-        const std::string& dbType = "",
-        const std::string& dbPath = "");
+    std::expected<void, std::string> ensureDatabaseWithOptions(
+        std::string_view dbType,
+        const boost::program_options::variables_map& options);
 
+    // Database Management (старая версия для обратной совместимости)
+    std::expected<void, std::string> ensureDatabase(
+        std::string_view dbType,
+        std::string_view dbPath = "");
 
 private:
     std::shared_ptr<IPortfolioDatabase> database_;

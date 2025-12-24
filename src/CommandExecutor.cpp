@@ -213,48 +213,134 @@ void CommandExecutor::printBacktestResult(
 // ═════════════════════════════════════════════════════════════════════════════
 
 std::expected<void, std::string> CommandExecutor::ensureDatabase(
-    const std::string& dbType,
-    const std::string& dbPath)
-{
-    // Если база уже инициализирована, ничего не делаем
+    std::string_view dbType,
+    std::string_view dbPath) {
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Если база уже инициализирована, просто возвращаем успех
+    // ════════════════════════════════════════════════════════════════════════
+
     if (database_) {
         return {};
     }
 
-    // Определяем имя плагина на основе типа БД
-    std::string pluginName;
-    std::string config;
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 1: Загрузка плагина базы данных
+    // ════════════════════════════════════════════════════════════════════════
 
-    // Простое отображение типа -> имя плагина
-    pluginName = dbType;
-    config = dbPath;
-
-
-    auto dbResult = databasePluginManager_->load(pluginName, config);
+    // ИЗМЕНЕНО: Больше не передаем dbPath в load()
+    // Плагин будет инициализирован через initializeFromOptions()
+    auto dbResult = databasePluginManager_->load(dbType, "");  // Пустой config
 
     if (!dbResult) {
-        // Если не удалось загрузить, получаем список доступных плагинов
+        std::string errorMsg = "Failed to load database plugin '" +
+                               std::string(dbType) + "': " + dbResult.error();
+
+        // Подсказка пользователю
         auto availablePlugins = databasePluginManager_->scanAvailablePlugins();
-
-        std::string errorMsg = "Failed to load database plugin '" + pluginName +
-                               "': " + dbResult.error();
-
         if (!availablePlugins.empty()) {
-            errorMsg += "\n\nAvailable database plugins:";
-            for (const auto& p : availablePlugins) {
-                errorMsg += "\n  - " + p.displayName + " v" + p.version +
-                            " (use: " + p.name + ")";
+            errorMsg += "\n\nAvailable database plugins:\n";
+            for (const auto& plugin : availablePlugins) {
+                errorMsg += "  - " + plugin.name;
+                if (plugin.name != plugin.displayName) {
+                    errorMsg += " (" + plugin.displayName + ")";
+                }
+                errorMsg += "\n";
             }
-        } else {
-            errorMsg += "\n\nNo database plugins found in: " +
-                        databasePluginManager_->getPluginPath();
-            errorMsg += "\nPlease check PORTFOLIO_PLUGIN_PATH environment variable.";
         }
 
         return std::unexpected(errorMsg);
     }
 
     database_ = dbResult.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 2: НОВОЕ - Инициализация через initializeFromOptions
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ПРИМЕЧАНИЕ: Этот метод вызывается из executeLoad и других команд,
+    // где у нас уже есть parsed options. Поэтому нам нужно передавать
+    // options из вызывающего кода.
+    //
+    // Для обратной совместимости, если вызывается старый способ с dbPath,
+    // мы должны создать temporary options map.
+
+    if (!dbPath.empty()) {
+        // Обратная совместимость: создаем temporary options
+        po::variables_map tempOptions;
+
+        // Добавляем db-path для обратной совместимости
+        // Плагин SQLite будет искать как --sqlite-path, так и --db-path
+        tempOptions.insert({"db-path",
+                            po::variable_value(std::string(dbPath), false)});
+
+        auto initResult = database_->initializeFromOptions(tempOptions);
+        if (!initResult) {
+            database_ = nullptr;
+            return std::unexpected(
+                "Failed to initialize database: " + initResult.error());
+        }
+    }
+    // Если dbPath пуст, то инициализация будет выполнена позже
+    // через вызов initializeFromOptions с полным набором опций
+
+    return {};
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// НОВЫЙ МЕТОД: ensureDatabase с options map (для новой архитектуры)
+// ═════════════════════════════════════════════════════════════════════════════
+
+std::expected<void, std::string> CommandExecutor::ensureDatabaseWithOptions(
+    std::string_view dbType,
+    const po::variables_map& options) {
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Если база уже инициализирована, просто возвращаем успех
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (database_) {
+        return {};
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 1: Загрузка плагина базы данных
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto dbResult = databasePluginManager_->load(dbType, "");  // Пустой config
+
+    if (!dbResult) {
+        std::string errorMsg = "Failed to load database plugin '" +
+                               std::string(dbType) + "': " + dbResult.error();
+
+        auto availablePlugins = databasePluginManager_->scanAvailablePlugins();
+        if (!availablePlugins.empty()) {
+            errorMsg += "\n\nAvailable database plugins:\n";
+            for (const auto& plugin : availablePlugins) {
+                errorMsg += "  - " + plugin.name;
+                if (plugin.name != plugin.displayName) {
+                    errorMsg += " (" + plugin.displayName + ")";
+                }
+                errorMsg += "\n";
+            }
+        }
+
+        return std::unexpected(errorMsg);
+    }
+
+    database_ = dbResult.value();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 2: Инициализация через initializeFromOptions
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto initResult = database_->initializeFromOptions(options);
+    if (!initResult) {
+        database_ = nullptr;
+        return std::unexpected(
+            "Failed to initialize database: " + initResult.error());
+    }
+
     return {};
 }
 
@@ -720,7 +806,6 @@ std::expected<void, std::string> CommandExecutor::executeInstrument(const Parsed
     }
 }
 
-
 std::expected<void, std::string> CommandExecutor::executeInstrumentList(
     const ParsedCommand& cmd)
 {
@@ -728,25 +813,24 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentList(
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "inmemory_db";
-    std::string dbPath;
-
-    if (cmd.options.count("db")) {
-        dbType = cmd.options.at("db").as<std::string>();
+    auto dbTypeResult = getRequiredOption<std::string>(cmd, "db");
+    if (!dbTypeResult) {
+        return std::unexpected(
+            "Database type not specified.\n"
+            "Use --db <type> to specify database type.\n"
+            "Available types: inmemory_db, sqlite_db\n"
+            "Use 'portfolio plugin list database' to see all available database plugins.");
     }
 
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
-    }
+    const std::string& dbType = *dbTypeResult;
 
-    // Инициализируем базу данных если необходимо
-    auto dbResult = ensureDatabase(dbType, dbPath);
+    auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Получение фильтров (опционально)
+    // Получение фильтров
     // ════════════════════════════════════════════════════════════════════════
 
     std::string typeFilter;
@@ -764,77 +848,68 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentList(
     // Получение списка инструментов
     // ════════════════════════════════════════════════════════════════════════
 
-    if (!database_) {
-        return std::unexpected("Database not initialized");
+    auto instrumentsResult = database_->listInstruments(typeFilter, sourceFilter);
+    if (!instrumentsResult) {
+        return std::unexpected(instrumentsResult.error());
     }
 
-    auto result = database_->listInstruments(typeFilter, sourceFilter);
-    if (!result) {
-        return std::unexpected(result.error());
-    }
-
-    const auto& instruments = result.value();
+    const auto& instruments = instrumentsResult.value();
 
     // ════════════════════════════════════════════════════════════════════════
     // Вывод результатов
     // ════════════════════════════════════════════════════════════════════════
 
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "INSTRUMENTS" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
     if (instruments.empty()) {
-        std::cout << "No instruments found.";
-
+        std::cout << "No instruments found" << std::endl;
         if (!typeFilter.empty() || !sourceFilter.empty()) {
-            std::cout << " (with filters:";
+            std::cout << "\nFilters applied:" << std::endl;
             if (!typeFilter.empty()) {
-                std::cout << " type=" << typeFilter;
+                std::cout << "  Type:   " << typeFilter << std::endl;
             }
             if (!sourceFilter.empty()) {
-                std::cout << " source=" << sourceFilter;
-            }
-            std::cout << ")";
-        }
-
-        std::cout << std::endl;
-    } else {
-        std::cout << "Instruments (" << instruments.size() << ")";
-
-        if (!typeFilter.empty() || !sourceFilter.empty()) {
-            std::cout << " with filters:";
-            if (!typeFilter.empty()) {
-                std::cout << " type=" << typeFilter;
-            }
-            if (!sourceFilter.empty()) {
-                std::cout << " source=" << sourceFilter;
+                std::cout << "  Source: " << sourceFilter << std::endl;
             }
         }
-
-        std::cout << ":" << std::endl;
-
-        for (const auto& id : instruments) {
-            std::cout << "  - " << id << std::endl;
-        }
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+        return {};
     }
+
+    std::cout << "Found " << instruments.size() << " instrument(s)" << std::endl;
+    std::cout << std::string(70, '-') << std::endl;
+
+    for (const auto& id : instruments) {
+        std::cout << "  " << id << std::endl;
+    }
+
+    std::cout << std::string(70, '=') << std::endl << std::endl;
 
     return {};
 }
-std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const ParsedCommand& cmd)
+
+
+std::expected<void, std::string> CommandExecutor::executeInstrumentShow(
+    const ParsedCommand& cmd)
 {
     // ════════════════════════════════════════════════════════════════════════
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "inmemory_db";
-    std::string dbPath;
-
-    if (cmd.options.count("db")) {
-        dbType = cmd.options.at("db").as<std::string>();
+    auto dbTypeResult = getRequiredOption<std::string>(cmd, "db");
+    if (!dbTypeResult) {
+        return std::unexpected(
+            "Database type not specified.\n"
+            "Use --db <type> to specify database type.\n"
+            "Available types: inmemory_db, sqlite_db\n"
+            "Use 'portfolio plugin list database' to see all available database plugins.");
     }
 
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
-    }
+    const std::string& dbType = *dbTypeResult;
 
-    // Инициализируем базу данных если необходимо
-    auto dbResult = ensureDatabase(dbType, dbPath);
+    auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
@@ -850,23 +925,19 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
 
     std::string instrumentId = idResult.value();
 
-    if (!database_) {
-        return std::unexpected("Database not initialized");
-    }
-
     // ════════════════════════════════════════════════════════════════════════
     // Получение информации об инструменте
     // ════════════════════════════════════════════════════════════════════════
 
-    auto instrumentInfo = database_->getInstrument(instrumentId);
-    if (!instrumentInfo) {
-        return std::unexpected(instrumentInfo.error());
+    auto instrumentResult = database_->getInstrument(instrumentId);
+    if (!instrumentResult) {
+        return std::unexpected(instrumentResult.error());
     }
 
-    const auto& info = instrumentInfo.value();
+    const auto& instrument = instrumentResult.value();
 
     // ════════════════════════════════════════════════════════════════════════
-    // Получение списка атрибутов
+    // Получение атрибутов инструмента
     // ════════════════════════════════════════════════════════════════════════
 
     auto attributesResult = database_->listInstrumentAttributes(instrumentId);
@@ -881,16 +952,17 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
     // ════════════════════════════════════════════════════════════════════════
 
     std::cout << "\n" << std::string(80, '=') << std::endl;
-    std::cout << "INSTRUMENT: " << info.id << std::endl;
-    std::cout << std::string(80, '=') << std::endl;
+    std::cout << "INSTRUMENT: " << instrument.id << std::endl;
+    std::cout << std::string(80, '=') << std::endl << std::endl;
 
-    std::cout << "Name:   " << info.name << std::endl;
-    std::cout << "Type:   " << info.type << std::endl;
-    std::cout << "Source: " << info.source << std::endl;
+    std::cout << "Name:    " << instrument.name << std::endl;
+    std::cout << "Type:    " << instrument.type << std::endl;
+    std::cout << "Source:  " << instrument.source << std::endl;
     std::cout << std::endl;
 
+    // Проверяем наличие атрибутов
     if (attributes.empty()) {
-        std::cout << "No attributes loaded for this instrument." << std::endl;
+        std::cout << "No attributes found for this instrument" << std::endl;
         std::cout << std::string(80, '=') << std::endl << std::endl;
         return {};
     }
@@ -941,7 +1013,6 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(const Pa
 
     std::cout << std::string(80, '-') << std::endl << std::endl;
 
-    // Дополнительная информация
     std::cout << "TIP: Use 'portfolio load' to add more attributes" << std::endl;
     std::cout << "     Use 'portfolio strategy execute' to backtest with this instrument" << std::endl;
     std::cout << std::string(80, '=') << std::endl << std::endl;
@@ -956,19 +1027,19 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "inmemory_db";
-    std::string dbPath;
-
-    if (cmd.options.count("db")) {
-        dbType = cmd.options.at("db").as<std::string>();
+    auto dbTypeResult = getRequiredOption<std::string>(cmd, "db");
+    if (!dbTypeResult) {
+        return std::unexpected(
+            "Database type not specified.\n"
+            "Use --db <type> to specify database type.\n"
+            "Available types: inmemory_db, sqlite_db\n"
+            "Use 'portfolio plugin list database' to see all available database plugins.");
     }
 
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
-    }
+    const std::string& dbType = *dbTypeResult;
 
-    // Инициализируем базу данных если необходимо
-    auto dbResult = ensureDatabase(dbType, dbPath);
+    // НОВЫЙ ПОДХОД: Используем ensureDatabaseWithOptions с полным набором опций
+    auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
@@ -1022,6 +1093,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
 
     return {};
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Portfolio Management
@@ -1588,21 +1660,21 @@ std::expected<void, std::string> CommandExecutor::executeStrategyExecute(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Инициализация базы данных
+    // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "inmemory_db";
-    std::string dbPath;
-
-    if (cmd.options.count("db")) {
-        dbType = cmd.options.at("db").as<std::string>();
+    auto dbTypeResult = getRequiredOption<std::string>(cmd, "db");
+    if (!dbTypeResult) {
+        return std::unexpected(
+            "Database type not specified.\n"
+            "Use --db <type> to specify database type.\n"
+            "Available types: inmemory_db, sqlite_db\n"
+            "Use 'portfolio plugin list database' to see all available database plugins.");
     }
 
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
-    }
+    const std::string& dbType = *dbTypeResult;
 
-    auto dbResult = ensureDatabase(dbType, dbPath);
+    auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
@@ -1904,17 +1976,16 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
 
     const std::string& dbType = *dbTypeResult;
 
-    std::string dbPath;
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
-    }
-
-    auto dbResult = ensureDatabase(dbType, dbPath);
+    // НОВЫЙ ПОДХОД: Используем ensureDatabaseWithOptions с полным набором опций
+    // Плагин сам извлечет нужные ему опции (например, --sqlite-path)
+    auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
 
     std::cout << "✓ Database initialized (" << dbType << ")" << std::endl;
+
+
 
     // ═════════════════════════════════════════════════════════════════════════
     // Шаг 4: Сохранение инструмента в базе

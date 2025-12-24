@@ -2,6 +2,7 @@
 #include "CommandExecutor.hpp"
 #include "PluginManager.hpp"
 #include "IDataSource.hpp"
+#include "IPortfolioDatabase.hpp"
 #include <iostream>
 #include <memory>
 
@@ -21,10 +22,17 @@ int main(int argc, char** argv)
             std::make_shared<PluginManager<IDataSource>>(searchPath);
 
         // ═════════════════════════════════════════════════════════════════════
+        // НОВОЕ: Инициализация PluginManager для баз данных
+        // ═════════════════════════════════════════════════════════════════════
+
+        auto databasePluginManager =
+            std::make_shared<PluginManager<IPortfolioDatabase>>(searchPath);
+
+        // ═════════════════════════════════════════════════════════════════════
         // Создание парсера с доступом к плагинам
         // ═════════════════════════════════════════════════════════════════════
 
-        CommandLineParser parser(dataSourcePluginManager);
+        CommandLineParser parser(dataSourcePluginManager, databasePluginManager);
         auto parseResult = parser.parse(argc, argv);
 
         if (!parseResult) {

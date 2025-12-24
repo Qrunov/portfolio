@@ -8,6 +8,7 @@
 #include <vector>
 #include <expected>
 #include <iostream>
+#include <sstream>
 #include <filesystem>
 #include <algorithm>
 #include <boost/program_options.hpp>
@@ -29,8 +30,9 @@ struct PluginCommandLineMetadata {
     std::string description;      // Краткое описание
     std::vector<std::string> examples;  // Примеры использования
 
-    // Опции командной строки (опциональны, могут быть nullptr если плагин не поддерживает)
-    const boost::program_options::options_description* commandLineOptions;
+    // Опции командной строки
+    // shared_ptr потому что библиотека остается открытой
+    std::shared_ptr<boost::program_options::options_description> commandLineOptions;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -132,6 +134,14 @@ public:
 
     ~PluginManager() {
         unloadAll();
+
+        // КРИТИЧНО: Закрываем все handle'ы метаданных
+        for (auto& [name, handle] : metadataHandles_) {
+            if (handle) {
+                dlclose(handle);
+            }
+        }
+        metadataHandles_.clear();
     }
 
     std::string getPluginPath() const {
@@ -161,11 +171,27 @@ public:
                 std::string("Plugin library not found: ") + soPath.string());
         }
 
-        // Загружаем библиотеку временно только для чтения метаданных
-        void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
-        if (!handle) {
-            std::string error = dlerror() ? dlerror() : "Unknown dlopen error";
-            return std::unexpected(error);
+        // ═════════════════════════════════════════════════════════════════
+        // КРИТИЧНО: Проверяем кэш или загружаем библиотеку
+        // Библиотека НЕ будет закрыта - она останется открытой!
+        // ═════════════════════════════════════════════════════════════════
+        std::string pluginName = std::string(name);
+        void* handle = nullptr;
+
+        auto it = metadataHandles_.find(pluginName);
+        if (it != metadataHandles_.end()) {
+            // Уже загружена, используем существующий handle
+            handle = it->second;
+        } else {
+            // Загружаем библиотеку и сохраняем handle
+            handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+            if (!handle) {
+                std::string error = dlerror() ? dlerror() : "Unknown dlopen error";
+                return std::unexpected(error);
+            }
+
+            // Сохраняем handle в кэше - библиотека останется открытой!
+            metadataHandles_[pluginName] = handle;
         }
 
         PluginCommandLineMetadata metadata;
@@ -199,10 +225,34 @@ public:
             }
         }
 
+        // ═════════════════════════════════════════════════════════════════
         // Получаем опции командной строки
-        metadata.commandLineOptions = getOptionsFunc ? getOptionsFunc() : nullptr;
+        // Библиотека открыта, поэтому указатели валидны!
+        // ═════════════════════════════════════════════════════════════════
+        if (getOptionsFunc) {
+            const boost::program_options::options_description* pluginOptions =
+                getOptionsFunc();
 
-        dlclose(handle);
+            if (pluginOptions) {
+                // Используем shared_ptr с пустым deleter'ом
+                // Память принадлежит библиотеке и будет освобождена при dlclose в деструкторе
+                metadata.commandLineOptions =
+                    std::shared_ptr<boost::program_options::options_description>(
+                        const_cast<boost::program_options::options_description*>(pluginOptions),
+                        [](boost::program_options::options_description*){
+                            // Пустой deleter - не удаляем память, она принадлежит библиотеке
+                        }
+                        );
+            } else {
+                metadata.commandLineOptions = nullptr;
+            }
+        } else {
+            metadata.commandLineOptions = nullptr;
+        }
+
+        // НЕ закрываем библиотеку - она должна оставаться открытой!
+        // handle будет закрыт в деструкторе PluginManager
+        // dlclose(handle);  // ← УБРАНО
 
         return metadata;
     }
@@ -220,6 +270,16 @@ public:
         }
 
         return allMetadata;
+    }
+
+    // Получить информацию о загруженном плагине
+    std::expected<const PluginInfo*, std::string> getPluginInfo(std::string_view name) const {
+        auto it = loadedPlugins_.find(std::string(name));
+        if (it == loadedPlugins_.end()) {
+            return std::unexpected(
+                std::string("Plugin not loaded: ") + std::string(name));
+        }
+        return &(it->second);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -244,16 +304,14 @@ public:
                 "' create function returned nullptr");
         }
 
-        return std::shared_ptr<PluginInterface>(
-            instance,
-            PluginDeleter{info.destroy});
+        return std::shared_ptr<PluginInterface>(instance, PluginDeleter{info.destroy});
     }
 
     Result unload(std::string_view name) {
         auto it = loadedPlugins_.find(std::string(name));
         if (it == loadedPlugins_.end()) {
             return std::unexpected(
-                std::string("Plugin not found: ") + std::string(name));
+                std::string("Plugin not loaded: ") + std::string(name));
         }
 
         if (it->second.handle) {
@@ -273,16 +331,17 @@ public:
         loadedPlugins_.clear();
     }
 
-    std::expected<const PluginInfo*, std::string> getPluginInfo(
-        std::string_view name) const {
+    bool isLoaded(std::string_view name) const {
+        return loadedPlugins_.find(std::string(name)) != loadedPlugins_.end();
+    }
 
-        auto it = loadedPlugins_.find(std::string(name));
-        if (it == loadedPlugins_.end()) {
-            return std::unexpected(
-                std::string("Plugin not loaded: ") + std::string(name));
+    std::vector<std::string> getLoadedPluginNames() const {
+        std::vector<std::string> names;
+        names.reserve(loadedPlugins_.size());
+        for (const auto& [name, _] : loadedPlugins_) {
+            names.push_back(name);
         }
-
-        return &it->second;
+        return names;
     }
 
     std::vector<AvailablePlugin> scanAvailablePlugins() const {
@@ -291,21 +350,23 @@ public:
         std::filesystem::path pluginDir =
             std::filesystem::path(pluginPath_) / Traits::subdirectory();
 
-        if (!std::filesystem::exists(pluginDir) ||
-            !std::filesystem::is_directory(pluginDir)) {
+        if (!std::filesystem::exists(pluginDir)) {
             return available;
         }
 
         for (const auto& entry : std::filesystem::directory_iterator(pluginDir)) {
-            if (!entry.is_regular_file()) continue;
-
-            std::string filename = entry.path().filename().string();
-            if (filename.size() <= 3 || filename.substr(filename.size() - 3) != ".so") {
+            if (!entry.is_regular_file()) {
                 continue;
             }
 
-            std::filesystem::path soPath = entry.path();
-            void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+            std::string filename = entry.path().filename().string();
+            if (filename.size() < 4 || filename.substr(filename.size() - 3) != ".so") {
+                continue;
+            }
+
+            std::string pluginName = filename.substr(0, filename.size() - 3);
+
+            void* handle = dlopen(entry.path().c_str(), RTLD_NOW | RTLD_LOCAL);
             if (!handle) {
                 continue;
             }
@@ -325,14 +386,13 @@ public:
 
             if (getNameFunc) {
                 AvailablePlugin plugin;
-
-                std::string pluginName = filename.substr(0, filename.size() - 3);
                 plugin.name = pluginName;
-                plugin.systemName = getSystemNameFunc ? getSystemNameFunc() : pluginName;
+                plugin.systemName = getSystemNameFunc ?
+                                        getSystemNameFunc() : pluginName;
                 plugin.displayName = getNameFunc();
                 plugin.version = getVersionFunc ? getVersionFunc() : "unknown";
                 plugin.type = getTypeFunc ? getTypeFunc() : Traits::typeName();
-                plugin.path = soPath.string();
+                plugin.path = entry.path().string();
                 plugin.description = getDescFunc ? getDescFunc() : "";
 
                 if (getExamplesFunc) {
@@ -364,6 +424,10 @@ private:
     std::string pluginPath_;
     std::map<std::string, PluginInfo> loadedPlugins_;
 
+    // КРИТИЧНО: Кэш handle'ов для метаданных
+    // Храним открытые библиотеки, чтобы их опции оставались валидными
+    mutable std::map<std::string, void*> metadataHandles_;
+
     std::expected<std::reference_wrapper<const PluginInfo>, std::string>
     loadPlugin(std::string_view name) {
 
@@ -385,7 +449,8 @@ private:
 
         void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
-            std::string error = dlerror() ? dlerror() : "Unknown dlopen error";
+            std::string error = dlerror() ?
+                                    dlerror() : "Unknown dlopen error";
             return std::unexpected(error);
         }
 

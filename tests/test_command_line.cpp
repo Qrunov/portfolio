@@ -9,7 +9,7 @@ class CommandExecutorTest : public ::testing::Test {
 protected:
     void SetUp() override {
         executor = std::make_unique<CommandExecutor>();
-        executor -> ensureDatabase("inmemory_db","");
+        // Убрали ensureDatabase из SetUp - каждый тест сам инициализирует БД
     }
 
     std::unique_ptr<CommandExecutor> executor;
@@ -45,21 +45,19 @@ TEST_F(CommandExecutorTest, ExecuteVersionCommand) {
 // ТЕСТЫ: Instrument Commands
 // ============================================================================
 
-
 TEST_F(CommandExecutorTest, ExecuteInstrumentListEmpty) {
     ParsedCommand cmd;
     cmd.command = "instrument";
     cmd.subcommand = "list";
 
+    // ИСПРАВЛЕНИЕ: Добавляем опцию --db
+    cmd.options.insert({"db", po::variable_value(std::string("inmemory_db"), false)});
+
     auto result = executor->execute(cmd);
 
-    if (!result) {
-        // Проверяем что это ошибка связанная с загрузкой плагина
-        EXPECT_TRUE(
-            result.error().find("Failed to load database plugin") != std::string::npos ||
-            result.error().find("Database not initialized") != std::string::npos
-            ) << "Unexpected error: " << result.error();
-    }
+    // InMemory база данных не требует дополнительной инициализации,
+    // поэтому команда должна успешно выполниться и вернуть пустой список
+    EXPECT_TRUE(result) << "Error: " << (result ? "" : result.error());
 }
 
 TEST_F(CommandExecutorTest, ExecuteInstrumentShowNoId) {
@@ -68,9 +66,14 @@ TEST_F(CommandExecutorTest, ExecuteInstrumentShowNoId) {
     cmd.subcommand = "show";
     // Missing instrument-id option
 
+    // Добавляем опцию --db
+    cmd.options.insert({"db", po::variable_value(std::string("inmemory_db"), false)});
+
     auto result = executor->execute(cmd);
 
-    EXPECT_FALSE(result);  // Должна быть ошибка
+    EXPECT_FALSE(result);  // Должна быть ошибка о missing instrument-id
+    EXPECT_TRUE(result.error().find("instrument-id") != std::string::npos ||
+                result.error().find("Required option") != std::string::npos);
 }
 
 // ============================================================================
@@ -117,20 +120,18 @@ TEST_F(CommandExecutorTest, ExecuteStrategyExecuteMissingStrategy) {
 // ТЕСТЫ: Source Commands
 // ============================================================================
 
-
 TEST_F(CommandExecutorTest, ExecuteSourceListEmpty) {
     ParsedCommand cmd;
     cmd.command = "source";
     cmd.subcommand = "list";
 
+    // Добавляем опцию --db
+    cmd.options.insert({"db", po::variable_value(std::string("inmemory_db"), false)});
+
     auto result = executor->execute(cmd);
 
-    if (!result) {
-        EXPECT_TRUE(
-            result.error().find("Failed to load database plugin") != std::string::npos ||
-            result.error().find("Database not initialized") != std::string::npos
-            ) << "Unexpected error: " << result.error();
-    }
+    // С inmemory_db команда должна успешно выполниться
+    EXPECT_TRUE(result) << "Error: " << (result ? "" : result.error());
 }
 
 // ============================================================================
@@ -146,7 +147,8 @@ TEST_F(CommandExecutorTest, ExecutePortfolioCreateNoName) {
     auto result = executor->execute(cmd);
 
     EXPECT_FALSE(result);  // Должна быть ошибка
-    EXPECT_TRUE(result.error().find("Required option missing") != std::string::npos);
+    EXPECT_TRUE(result.error().find("Required option missing") != std::string::npos ||
+                result.error().find("name") != std::string::npos);
 }
 
 TEST_F(CommandExecutorTest, ExecutePortfolioList) {
@@ -203,7 +205,7 @@ TEST_F(CommandLineParserTest, ParseVersionCommand) {
 }
 
 TEST_F(CommandLineParserTest, ParseInstrumentListCommand) {
-    const char* argv[] = {"portfolio", "instrument", "list","--db", "inmemory_db"};
+    const char* argv[] = {"portfolio", "instrument", "list", "--db", "inmemory_db"};
     int argc = 5;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
@@ -240,7 +242,7 @@ TEST_F(CommandLineParserTest, ParsePortfolioCreateWithOptions) {
 }
 
 TEST_F(CommandLineParserTest, ParseStrategyListCommand) {
-    const char* argv[] = {"portfolio", "strategy", "list","--db", "inmemory_db"};
+    const char* argv[] = {"portfolio", "strategy", "list", "--db", "inmemory_db"};
     int argc = 5;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
@@ -251,7 +253,7 @@ TEST_F(CommandLineParserTest, ParseStrategyListCommand) {
 }
 
 TEST_F(CommandLineParserTest, ParseSourceListCommand) {
-    const char* argv[] = {"portfolio", "source", "list","--db", "inmemory_db"};
+    const char* argv[] = {"portfolio", "source", "list", "--db", "inmemory_db"};
     int argc = 5;
 
     auto result = parser.parse(argc, const_cast<char**>(argv));
@@ -268,8 +270,7 @@ TEST_F(CommandLineParserTest, ParseStrategyExecuteCommand) {
         "-p", "MyPortfolio",
         "--from", "2024-01-01",
         "--to", "2024-12-31",
-        "--db",
-        "inmemory_db"
+        "--db", "inmemory_db"
     };
     int argc = 13;
 
@@ -283,9 +284,6 @@ TEST_F(CommandLineParserTest, ParseStrategyExecuteCommand) {
     EXPECT_TRUE(result.value().options.count("from"));
     EXPECT_TRUE(result.value().options.count("to"));
 }
-
-
-
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);

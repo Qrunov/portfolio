@@ -8,21 +8,98 @@
 namespace portfolio {
 
 SQLiteDatabase::SQLiteDatabase(std::string_view dbPath)
-    : dbPath_(dbPath), db_(nullptr)
-{
-    auto result = initialize();
-    if (!result) {
-        throw std::runtime_error("Failed to initialize SQLite database: " + result.error());
+    : dbPath_(dbPath), initialized_(false) {
+    // Если путь не пуст, инициализируем сразу (обратная совместимость)
+    if (!dbPath.empty()) {
+        auto result = initializeDatabase(dbPath);
+        if (!result) {
+            throw std::runtime_error("Failed to initialize database: " + result.error());
+        }
     }
+    // Иначе ждем вызова initializeFromOptions()
 }
 
 SQLiteDatabase::~SQLiteDatabase() {
     if (db_) {
         sqlite3_close(db_);
+        db_ = nullptr;
     }
 }
 
-Result SQLiteDatabase::initialize() {
+Result SQLiteDatabase::initializeFromOptions(
+    const boost::program_options::variables_map& options) {
+
+    // Проверяем, не инициализирована ли база данных уже
+    if (initialized_) {
+        return {};  // Уже инициализирована
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 1: Получение пути к БД из опций
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string dbPath;
+
+    // Новый способ: --sqlite-path
+    if (options.count("sqlite-path")) {
+        dbPath = options.at("sqlite-path").as<std::string>();
+    }
+    // Обратная совместимость: --db-path
+    else if (options.count("db-path")) {
+        dbPath = options.at("db-path").as<std::string>();
+    }
+    else {
+        return std::unexpected(
+            "SQLite database path not specified.\n"
+            "Use --sqlite-path <path> or (legacy) --db-path <path>");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Шаг 2: Инициализация базы данных
+    // ════════════════════════════════════════════════════════════════════════
+
+    return initializeDatabase(dbPath);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// НОВЫЙ ПРИВАТНЫЙ МЕТОД: Внутренняя инициализация
+// ═════════════════════════════════════════════════════════════════════════════
+
+Result SQLiteDatabase::initializeDatabase(std::string_view path) {
+    if (initialized_) {
+        return {};  // Уже инициализирована
+    }
+
+    dbPath_ = std::string(path);
+
+    // Открываем или создаем БД
+    int rc = sqlite3_open(dbPath_.c_str(), &db_);
+    if (rc != SQLITE_OK) {
+        std::string error = "Failed to open database: ";
+        if (db_) {
+            error += sqlite3_errmsg(db_);
+            sqlite3_close(db_);
+            db_ = nullptr;
+        } else {
+            error += "Out of memory";
+        }
+        return std::unexpected(error);
+    }
+
+    // Создаем таблицы если их нет
+    auto createResult = createTables();
+    if (!createResult) {
+        sqlite3_close(db_);
+        db_ = nullptr;
+        return createResult;
+    }
+
+    initialized_ = true;
+    return {};
+}
+
+
+/*Result SQLiteDatabase::initialize() {
     // Создаем директорию если нужно
     std::filesystem::path dbFilePath(dbPath_);
     if (dbFilePath.has_parent_path()) {
@@ -40,7 +117,7 @@ Result SQLiteDatabase::initialize() {
 
     // Создаем таблицы если их нет
     return createTables();
-}
+}*/
 
 Result SQLiteDatabase::createTables() {
     const char* sql = R"(

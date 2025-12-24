@@ -5,6 +5,7 @@
 #include <vector>
 #include <set>
 #include <algorithm>
+#include <boost/program_options.hpp>
 
 namespace portfolio {
 
@@ -41,6 +42,21 @@ public:
     InMemoryDatabase() = default;
     ~InMemoryDatabase() override = default;
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Инициализация из опций командной строки
+    // ═════════════════════════════════════════════════════════════════════════
+
+    // InMemory база не требует опций, поэтому просто возвращаем успех
+    Result initializeFromOptions(
+        [[maybe_unused]] const boost::program_options::variables_map& options) override {
+        // InMemory база не требует инициализации с опциями
+        return {};
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // IPortfolioDatabase interface
+    // ═════════════════════════════════════════════════════════════════════════
+
     std::expected<std::vector<std::string>, std::string> listSources() override;
 
     Result saveInstrument(
@@ -48,16 +64,16 @@ public:
         std::string_view name,
         std::string_view type,
         std::string_view source
-    ) override;
+        ) override;
 
     std::expected<bool, std::string> instrumentExists(
         std::string_view instrumentId
-    ) override;
+        ) override;
 
     std::expected<std::vector<std::string>, std::string> listInstruments(
         std::string_view typeFilter = "",
         std::string_view sourceFilter = ""
-    ) override;
+        ) override;
 
     Result saveAttribute(
         std::string_view instrumentId,
@@ -65,14 +81,14 @@ public:
         std::string_view source,
         const TimePoint& timestamp,
         const AttributeValue& value
-    ) override;
+        ) override;
 
     Result saveAttributes(
         std::string_view instrumentId,
         std::string_view attributeName,
         std::string_view source,
         const std::vector<std::pair<TimePoint, AttributeValue>>& values
-    ) override;
+        ) override;
 
     std::expected<std::vector<std::pair<TimePoint, AttributeValue>>, std::string> getAttributeHistory(
         std::string_view instrumentId,
@@ -80,7 +96,7 @@ public:
         const TimePoint& startDate,
         const TimePoint& endDate,
         std::string_view sourceFilter = ""
-    ) override;
+        ) override;
 
     Result deleteInstrument(std::string_view instrumentId) override;
 
@@ -88,32 +104,36 @@ public:
         std::string_view instrumentIdFilter = "",
         std::string_view typeFilter = "",
         std::string_view sourceFilter = ""
-    ) override;
+        ) override;
 
     Result deleteAttributes(
         std::string_view instrumentId,
         std::string_view attributeName = ""
-    ) override;
+        ) override;
 
     Result deleteSource(std::string_view source) override;
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // Информация об инструменте и атрибутах
+    // ═════════════════════════════════════════════════════════════════════════
+
     std::expected<IPortfolioDatabase::InstrumentInfo, std::string> getInstrument(
-        std::string_view instrumentId
-        ) override;
+        std::string_view instrumentId) override;
 
     std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> listInstrumentAttributes(
-        std::string_view instrumentId
-        ) override;
+        std::string_view instrumentId) override;
 
     std::expected<std::size_t, std::string> getAttributeValueCount(
         std::string_view instrumentId,
         std::string_view attributeName,
-        std::string_view sourceFilter = ""
-        ) override;
+        std::string_view sourceFilter = "") override;
 
+    // ═════════════════════════════════════════════════════════════════════════
     // Вспомогательные методы для тестирования
-    size_t getInstrumentCount() const { return instruments_.size(); }
-    size_t getAttributeCount(std::string_view instrumentId) const;
+    // ═════════════════════════════════════════════════════════════════════════
+
+    std::size_t getInstrumentCount() const { return instruments_.size(); }
+    std::size_t getAttributeCount(std::string_view instrumentId) const;
 };
 
 }  // namespace portfolio

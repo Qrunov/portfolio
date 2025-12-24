@@ -5,8 +5,10 @@
 namespace portfolio {
 
 CommandLineParser::CommandLineParser(
-    std::shared_ptr<PluginManager<IDataSource>> dataSourcePluginManager)
-    : dataSourcePluginManager_(dataSourcePluginManager) {
+    std::shared_ptr<PluginManager<IDataSource>> dataSourcePluginManager,
+    std::shared_ptr<PluginManager<IPortfolioDatabase>> databasePluginManager)
+    : dataSourcePluginManager_(dataSourcePluginManager),
+    databasePluginManager_(databasePluginManager) {
 }
 
 std::expected<ParsedCommand, std::string> CommandLineParser::parse(
@@ -135,7 +137,6 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(
 // ═════════════════════════════════════════════════════════════════════════════
 // Create Load Options - С ДИНАМИЧЕСКОЙ ЗАГРУЗКОЙ ОПЦИЙ ПЛАГИНОВ
 // ═════════════════════════════════════════════════════════════════════════════
-
 po::options_description CommandLineParser::createLoadOptions() {
     po::options_description desc("Load options");
 
@@ -166,16 +167,17 @@ po::options_description CommandLineParser::createLoadOptions() {
         ("type,T", po::value<std::string>()->default_value("stock"),
          "Instrument type")
 
-        // Маппинг атрибутов
+        // Маппинг атрибутов (для обратной совместимости)
         ("map,m", po::value<std::vector<std::string>>()->multitoken(),
-         "Attribute mapping (attribute:source_id)")
+         "Attribute mapping (attribute:source_id) [legacy, use plugin-specific options]")
 
         // Опции базы данных
         ("db", po::value<std::string>()->required(),
-         "Database type")
+         "Database plugin name (e.g., sqlite_db, inmemory_db)")
 
+        // LEGACY: Обратная совместимость
         ("db-path", po::value<std::string>(),
-         "Database file path")
+         "Database file path [legacy, use --sqlite-path instead]")
 
         ("help,h", "Show help message");
 
@@ -196,18 +198,37 @@ po::options_description CommandLineParser::createLoadOptions() {
                 }
             }
         } catch (const std::exception& e) {
-            // Если не удалось загрузить метаданные плагинов,
-            // продолжаем с базовыми опциями
-            std::cerr << "Warning: Failed to load plugin metadata: "
-                      << e.what() << std::endl;
+            // Если не удалось загрузить опции, продолжаем без них
+            // Это не критично - опции могут отсутствовать у старых плагинов
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Динамическая загрузка опций плагинов базы данных
+    // ═════════════════════════════════════════════════════════════════════════
+
+    if (databasePluginManager_) {
+        try {
+            // Получаем метаданные всех доступных database плагинов
+            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
+
+            for (const auto& metadata : allMetadata) {
+                // Если плагин предоставляет опции командной строки
+                if (metadata.commandLineOptions) {
+                    // Добавляем опции плагина в общее описание
+                    desc.add(*metadata.commandLineOptions);
+                }
+            }
+        } catch (const std::exception& e) {
+            // Если не удалось загрузить опции, продолжаем без них
+            // Это не критично - опции могут отсутствовать у старых плагинов
         }
     }
 
     return desc;
 }
-
 // ═════════════════════════════════════════════════════════════════════════════
-// Остальные методы без изменений
+// Instrument Options
 // ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createInstrumentOptions() {
@@ -226,14 +247,37 @@ po::options_description CommandLineParser::createInstrumentOptions() {
          "Confirm deletion")
 
         ("db", po::value<std::string>()->required(),
-         "Database type")
+         "Database plugin name (e.g., sqlite_db, inmemory_db)")
 
+        // LEGACY: Обратная совместимость
         ("db-path", po::value<std::string>(),
-         "Database file path")
+         "Database file path [legacy, use plugin-specific options]")
 
         ("help,h", "Show help message");
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Динамическая загрузка опций database плагинов
+    // ═════════════════════════════════════════════════════════════════════════
+
+    if (databasePluginManager_) {
+        try {
+            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
+            for (const auto& metadata : allMetadata) {
+                if (metadata.commandLineOptions) {
+                    desc.add(*metadata.commandLineOptions);
+                }
+            }
+        } catch (const std::exception& e) {
+            // Не критично - продолжаем без динамических опций
+        }
+    }
+
     return desc;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Portfolio Options
+// ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createPortfolioOptions() {
     po::options_description desc("Portfolio options");
@@ -272,8 +316,30 @@ po::options_description CommandLineParser::createPortfolioOptions() {
          "Strategy parameter (key:value)")
 
         ("help,h", "Show help message");
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Динамическая загрузка опций database плагинов
+    // ═════════════════════════════════════════════════════════════════════════
+
+    if (databasePluginManager_) {
+        try {
+            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
+            for (const auto& metadata : allMetadata) {
+                if (metadata.commandLineOptions) {
+                    desc.add(*metadata.commandLineOptions);
+                }
+            }
+        } catch (const std::exception& e) {
+            // Не критично
+        }
+    }
+
     return desc;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Strategy Options
+// ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createStrategyOptions() {
     po::options_description desc("Strategy options");
@@ -294,10 +360,11 @@ po::options_description CommandLineParser::createStrategyOptions() {
          "Initial capital")
 
         ("db", po::value<std::string>(),
-         "Database type")
+         "Database plugin name")
 
+        // LEGACY
         ("db-path", po::value<std::string>(),
-         "Database path")
+         "Database path [legacy]")
 
         ("param,P", po::value<std::vector<std::string>>()->multitoken(),
          "Strategy parameters")
@@ -318,21 +385,66 @@ po::options_description CommandLineParser::createStrategyOptions() {
          "Import losses from previous year")
 
         ("help,h", "Show help message");
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Динамическая загрузка опций database плагинов
+    // ═════════════════════════════════════════════════════════════════════════
+
+    if (databasePluginManager_) {
+        try {
+            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
+            for (const auto& metadata : allMetadata) {
+                if (metadata.commandLineOptions) {
+                    desc.add(*metadata.commandLineOptions);
+                }
+            }
+        } catch (const std::exception& e) {
+            // Не критично
+        }
+    }
+
     return desc;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Source Options
+// ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createSourceOptions() {
     po::options_description desc("Source options");
     desc.add_options()
         ("db", po::value<std::string>()->required(),
-         "Database type")
+         "Database plugin name")
 
+        // LEGACY
         ("db-path", po::value<std::string>(),
-         "Database file path")
+         "Database file path [legacy]")
 
         ("help,h", "Show help message");
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Динамическая загрузка опций database плагинов
+    // ═════════════════════════════════════════════════════════════════════════
+
+    if (databasePluginManager_) {
+        try {
+            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
+            for (const auto& metadata : allMetadata) {
+                if (metadata.commandLineOptions) {
+                    desc.add(*metadata.commandLineOptions);
+                }
+            }
+        } catch (const std::exception& e) {
+            // Не критично
+        }
+    }
+
     return desc;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Plugin Options (без изменений)
+// ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createPluginOptions() {
     po::options_description desc("Plugin options");

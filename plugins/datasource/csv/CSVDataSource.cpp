@@ -306,8 +306,6 @@ std::expected<std::size_t, std::string> CSVDataSource::parseColumnIndex(
 Result CSVDataSource::initializeFromOptions(
     const boost::program_options::variables_map& options) {
 
-    // Извлекаем специфичные для CSV опции
-
     // 1. Обязательная опция: путь к файлу
     if (!options.count("csv-file")) {
         return std::unexpected(
@@ -343,16 +341,10 @@ Result CSVDataSource::initializeFromOptions(
     }
     dateColumnIndex_ = dateColumn - 1;
 
-    // 4. Валидация: проверяем, что файл существует
-    if (!std::filesystem::exists(filePath_)) {
-        return std::unexpected(
-            "CSV file not found: " + filePath_);
-    }
-
-    // 5. Очищаем предыдущие запросы атрибутов
+    // 4. Очищаем предыдущие запросы атрибутов
     attributeRequests_.clear();
 
-    // 6. Обрабатываем маппинги если они указаны
+    // 5. Обрабатываем маппинги если они указаны
     auto mappingResult = processMappingsFromOptions(options);
     if (!mappingResult) {
         return mappingResult;

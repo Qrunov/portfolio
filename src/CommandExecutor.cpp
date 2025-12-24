@@ -427,15 +427,11 @@ std::expected<void, std::string> CommandExecutor::execute(const ParsedCommand& c
 
 std::expected<void, std::string> CommandExecutor::executeHelp(const ParsedCommand& cmd)
 {
-    // Проверяем, есть ли конкретная тема для справки
-    if (!cmd.positional.empty()) {
-        std::string topic = cmd.positional[0];
-        printHelp(topic);
-    } else {
-        printHelp();
-    }
+    printHelp(cmd);
     return {};
 }
+
+
 
 std::expected<void, std::string> CommandExecutor::executeVersion(const ParsedCommand& /*cmd*/)
 {
@@ -443,8 +439,93 @@ std::expected<void, std::string> CommandExecutor::executeVersion(const ParsedCom
     return {};
 }
 
-void CommandExecutor::printHelp(std::string_view topic)
+void CommandExecutor::printVersion() const
 {
+    std::cout << "\n" << std::string(50, '=') << std::endl;
+    std::cout << "Portfolio Management System" << std::endl;
+    std::cout << "Version: 1.0.0" << std::endl;
+    std::cout << "Build Date: " << __DATE__ << std::endl;
+    std::cout << std::string(50, '=') << "\n" << std::endl;
+}
+
+
+void CommandExecutor::printPluginOptions(
+    const std::vector<std::string>& pluginNames,
+    std::string_view command,
+    std::string_view subcommand)
+{
+    if (pluginNames.empty() || !parser_) {
+        return;
+    }
+
+    bool headerPrinted = false;
+
+    for (const auto& pluginName : pluginNames) {
+        // Проверяем, использует ли команда этот тип плагина
+        auto pluginTypeResult = parser_->getPluginType(pluginName);
+        if (!pluginTypeResult) {
+            std::cout << "\nWarning: Unknown plugin '" << pluginName << "', skipping.\n";
+            continue;
+        }
+
+        const auto& pluginType = pluginTypeResult.value();
+
+        if (!parser_->commandUsesPluginType(command, subcommand, pluginType)) {
+            std::cout << "\nNote: Plugin '" << pluginName << "' (type: " << pluginType
+                      << ") is not used by this command, skipping.\n";
+            continue;
+        }
+
+        // Получаем опции плагина
+        auto optionsResult = parser_->getPluginOptions(pluginName);
+        if (!optionsResult) {
+            std::cout << "\nWarning: Could not load options for plugin '"
+                      << pluginName << "': " << optionsResult.error() << "\n";
+            continue;
+        }
+
+        // Выводим заголовок только один раз
+        if (!headerPrinted) {
+            std::cout << "\n" << std::string(70, '-') << std::endl;
+            std::cout << "PLUGIN-SPECIFIC OPTIONS (from --with):" << std::endl;
+            std::cout << std::string(70, '-') << std::endl;
+            headerPrinted = true;
+        }
+
+        // Выводим имя плагина и его опции
+        std::cout << "\nPlugin: " << pluginName << " (" << pluginType << ")" << std::endl;
+        std::cout << std::string(70, '.') << std::endl;
+
+        // Форматируем вывод опций с отступами
+        std::ostringstream oss;
+        oss << optionsResult.value();
+
+        std::string optionsStr = oss.str();
+        std::istringstream iss(optionsStr);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (!line.empty()) {
+                std::cout << "  " << line << std::endl;
+            }
+        }
+    }
+
+    if (headerPrinted) {
+        std::cout << std::string(70, '-') << std::endl;
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ИЗМЕНЕНО: printHelp принимает ParsedCommand для доступа к pluginNames
+// ═════════════════════════════════════════════════════════════════════════════
+
+void CommandExecutor::printHelp(const ParsedCommand& cmd)
+{
+    std::string topic;
+    if (!cmd.positional.empty()) {
+        topic = cmd.positional[0];
+    }
+
     if (topic.empty()) {
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "Portfolio Management System" << std::endl;
@@ -461,8 +542,14 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  version                 Show version information" << std::endl;
         std::cout << std::endl;
 
+        std::cout << "HELP OPTIONS:" << std::endl;
+        std::cout << "  portfolio help <command> [--with <plugin>]" << std::endl;
+        std::cout << "    --with PLUGIN         Show plugin-specific options (can be used up to 3 times)" << std::endl;
+        std::cout << std::endl;
+
         std::cout << "Examples:" << std::endl;
         std::cout << "  portfolio help load" << std::endl;
+        std::cout << "  portfolio help load --with csv --with sqlite_db" << std::endl;
         std::cout << "  portfolio help instrument" << std::endl;
         std::cout << "  portfolio help portfolio" << std::endl;
         std::cout << "  portfolio help strategy" << std::endl;
@@ -493,105 +580,38 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << std::endl;
         std::cout << "  Instrument identification:" << std::endl;
         std::cout << "    -t, --instrument-id ID    Instrument ID" << std::endl;
-        std::cout << "    -n, --name NAME           Instrument full name" << std::endl;
-        std::cout << "    -s, --source-name SOURCE  Data source name" << std::endl;
+        std::cout << "    -n, --name NAME           Instrument name" << std::endl;
+        std::cout << "    -s, --source-name SOURCE  Data source name (e.g., MOEX, Yahoo)" << std::endl;
         std::cout << std::endl;
 
         std::cout << "OPTIONAL OPTIONS:" << std::endl;
-        std::cout << "  Instrument:" << std::endl;
         std::cout << "    -T, --type TYPE           Instrument type (default: stock)" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  Attribute Mapping:" << std::endl;
-        std::cout << "    -m, --map MAPPING         Map attribute to data source" << std::endl;
-        std::cout << "                              Format depends on plugin" << std::endl;
-        std::cout << "                              Can be specified multiple times" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  Database:" << std::endl;
-        std::cout << "    --db TYPE                 Database type" << std::endl;
-        std::cout << "    --db-path PATH            Database file path" << std::endl;
+        std::cout << "    --db PLUGIN               Database plugin name (required)" << std::endl;
+        std::cout << "    -m, --map ATTR:COL        Attribute mapping [legacy]" << std::endl;
+        std::cout << "    --db-path PATH            Database file path [legacy]" << std::endl;
         std::cout << std::endl;
 
         // ═════════════════════════════════════════════════════════════════════
-        // Динамический вывод опций доступных плагинов
+        // НОВОЕ: Динамический вывод опций плагинов
         // ═════════════════════════════════════════════════════════════════════
 
-        std::cout << "AVAILABLE PLUGINS:" << std::endl;
-        std::cout << std::string(70, '-') << std::endl;
+        printPluginOptions(cmd.pluginNames, "load");
 
-        if (dataSourcePluginManager_) {
-            try {
-                auto allMetadata = dataSourcePluginManager_->getAllPluginMetadata();
-
-                if (allMetadata.empty()) {
-                    std::cout << "  No datasource plugins found." << std::endl;
-                    std::cout << "  Plugin path: " << dataSourcePluginManager_->getPluginPath() << std::endl;
-                } else {
-                    for (const auto& metadata : allMetadata) {
-                        std::cout << "\n  Plugin: " << metadata.systemName;
-                        if (!metadata.displayName.empty()) {
-                            std::cout << " (" << metadata.displayName << ")";
-                        }
-                        std::cout << std::endl;
-
-                        if (!metadata.description.empty()) {
-                            std::cout << "  " << metadata.description << std::endl;
-                        }
-
-                        if (metadata.commandLineOptions) {
-                            std::cout << "\n  Options:" << std::endl;
-                            std::ostringstream oss;
-                            oss << *metadata.commandLineOptions;
-
-                            // Форматируем вывод с отступами
-                            std::string optionsStr = oss.str();
-                            std::istringstream iss(optionsStr);
-                            std::string line;
-                            while (std::getline(iss, line)) {
-                                if (!line.empty()) {
-                                    std::cout << "    " << line << std::endl;
-                                }
-                            }
-                        }
-
-                        if (!metadata.examples.empty()) {
-                            std::cout << "\n  Examples:" << std::endl;
-                            for (const auto& example : metadata.examples) {
-                                if (!example.empty() && example[0] == '#') {
-                                    // Это комментарий
-                                    std::cout << "    " << example << std::endl;
-                                } else {
-                                    // Это команда
-                                    std::cout << "    $ " << example << std::endl;
-                                }
-                            }
-                        }
-
-                        std::cout << std::endl;
-                    }
-                }
-            } catch (const std::exception& e) {
-                std::cout << "  Error loading plugin metadata: " << e.what() << std::endl;
-            }
-        } else {
-            std::cout << "  Plugin manager not initialized" << std::endl;
-        }
-
-        std::cout << std::string(70, '-') << std::endl;
-        std::cout << std::endl;
-
-        std::cout << "GENERAL EXAMPLES:" << std::endl;
+        std::cout << "\nGENERAL EXAMPLES:" << std::endl;
         std::cout << "  # Using CSV plugin (new way):" << std::endl;
         std::cout << "  portfolio load --source csv --csv-file data.csv \\" << std::endl;
-        std::cout << "    -t SBER -n \"Sberbank\" -s MOEX -m Close:2 -m Volume:3 --db inmemory_db" << std::endl;
+        std::cout << "    -t SBER -n \"Sberbank\" -s MOEX --db inmemory_db" << std::endl;
         std::cout << std::endl;
         std::cout << "  # Using CSV plugin (backward compatibility):" << std::endl;
         std::cout << "  portfolio load --file data.csv -t SBER -n \"Sberbank\" -s MOEX \\" << std::endl;
-        std::cout << "    -m Close:2 -m Volume:3 --db inmemory_db" << std::endl;
+        std::cout << "    --db inmemory_db" << std::endl;
         std::cout << std::endl;
 
         std::cout << "SEE ALSO:" << std::endl;
-        std::cout << "  portfolio plugin list datasource    List available plugins" << std::endl;
+        std::cout << "  portfolio plugin list datasource    List available data source plugins" << std::endl;
+        std::cout << "  portfolio plugin list database       List available database plugins" << std::endl;
         std::cout << "  portfolio plugin info <name>         Show plugin details" << std::endl;
+        std::cout << "  portfolio help load --with csv       Show CSV plugin options" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "instrument") {
@@ -606,40 +626,38 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  delete -t ID            Delete an instrument" << std::endl;
         std::cout << std::endl;
 
+        std::cout << "COMMON OPTIONS:" << std::endl;
+        std::cout << "    --db PLUGIN             Database plugin name (required)" << std::endl;
+        std::cout << "    --db-path PATH          Database file path [legacy]" << std::endl;
+        std::cout << std::endl;
+
         std::cout << "LIST OPTIONS:" << std::endl;
-        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path (for sqlite_db)" << std::endl;
-        std::cout << "  --type TYPE             Filter by instrument type" << std::endl;
-        std::cout << "  -s, --source SOURCE     Filter by data source" << std::endl;
+        std::cout << "    -s, --source SOURCE     Filter by source" << std::endl;
+        std::cout << "    --type TYPE             Filter by instrument type" << std::endl;
         std::cout << std::endl;
 
         std::cout << "SHOW/DELETE OPTIONS:" << std::endl;
-        std::cout << "  -t, --instrument-id ID  Instrument ID" << std::endl;
-        std::cout << "  --db TYPE               Database type" << std::endl;
-        std::cout << "  --db-path PATH          Database file path" << std::endl;
+        std::cout << "    -t, --instrument-id ID  Instrument ID (required)" << std::endl;
+        std::cout << "    --confirm               Confirm deletion (for delete command)" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  # List all instruments from in-memory database" << std::endl;
-        std::cout << "  portfolio instrument list" << std::endl;
+        // ═════════════════════════════════════════════════════════════════════
+        // НОВОЕ: Динамический вывод опций плагинов
+        // ═════════════════════════════════════════════════════════════════════
+
+        printPluginOptions(cmd.pluginNames, "instrument");
+
+        std::cout << "\nEXAMPLES:" << std::endl;
+        std::cout << "  portfolio instrument list --db sqlite_db" << std::endl;
+        std::cout << "  portfolio instrument show -t SBER --db sqlite_db" << std::endl;
+        std::cout << "  portfolio instrument delete -t SBER --confirm --db sqlite_db" << std::endl;
         std::cout << std::endl;
-        std::cout << "  # List instruments from sqlite_db database" << std::endl;
-        std::cout << "  portfolio instrument list --db sqlite_db --db-path=./market.db" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  # List only stocks" << std::endl;
-        std::cout << "  portfolio instrument list --type stock" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  # List instruments from specific source" << std::endl;
-        std::cout << "  portfolio instrument list --source MOEX" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  # Show instrument details" << std::endl;
-        std::cout << "  portfolio instrument show -t SBER --db sqlite_db --db-path=./market.db" << std::endl;
-        std::cout << std::endl;
-        std::cout << "  # Delete instrument" << std::endl;
-        std::cout << "  portfolio instrument delete -t SBER" << std::endl;
+
+        std::cout << "SEE ALSO:" << std::endl;
+        std::cout << "  portfolio help instrument --with sqlite_db    Show SQLite DB options" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
-    } else if (topic == "portfolio") { //TODO: для portfolio для add-instrument, remove-instrument описаны не все опции
+    } else if (topic == "portfolio") {
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: portfolio" << std::endl;
         std::cout << "Manage investment portfolios" << std::endl;
@@ -655,6 +673,11 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  set-param               Set strategy parameters for portfolio" << std::endl;
         std::cout << std::endl;
 
+        std::cout << "COMMON OPTIONS:" << std::endl;
+        std::cout << "    --db PLUGIN             Database plugin name (required)" << std::endl;
+        std::cout << "    --db-path PATH          Database file path [legacy]" << std::endl;
+        std::cout << std::endl;
+
         std::cout << "CREATE OPTIONS:" << std::endl;
         std::cout << "  -n, --name NAME         Portfolio name (required)" << std::endl;
         std::cout << "  -d, --description DESC  Portfolio description" << std::endl;
@@ -666,49 +689,62 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  -P, --param KEY:VALUE   Parameter in key:value format" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  portfolio portfolio create -n MyPortfolio --initial-capital 100000" << std::endl;
-        std::cout << "  portfolio portfolio list" << std::endl;
-        std::cout << "  portfolio portfolio show -p MyPortfolio --detail" << std::endl;
-        std::cout << "  portfolio portfolio set-param -p MyPortfolio -P calendar:RTSI" << std::endl;
+        // ═════════════════════════════════════════════════════════════════════
+        // НОВОЕ: Динамический вывод опций плагинов
+        // ═════════════════════════════════════════════════════════════════════
+
+        printPluginOptions(cmd.pluginNames, "portfolio");
+
+        std::cout << "\nEXAMPLES:" << std::endl;
+        std::cout << "  portfolio portfolio create -n MyPortfolio --initial-capital 100000 --db inmemory_db" << std::endl;
+        std::cout << "  portfolio portfolio list --db inmemory_db" << std::endl;
+        std::cout << "  portfolio portfolio show -p MyPortfolio --detail --db inmemory_db" << std::endl;
+        std::cout << "  portfolio portfolio set-param -p MyPortfolio -P calendar:RTSI --db inmemory_db" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "SEE ALSO:" << std::endl;
+        std::cout << "  portfolio help portfolio --with inmemory_db    Show database options" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "strategy") {
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: strategy" << std::endl;
-        std::cout << "Execute and manage trading strategies" << std::endl;
+        std::cout << "Execute trading strategies" << std::endl;
         std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
         std::cout << "  list                    List available strategies" << std::endl;
-        std::cout << "  info -s NAME            Show strategy details" << std::endl;
-        std::cout << "  execute                 Execute a strategy backtest" << std::endl;
+        std::cout << "  execute                 Execute a strategy" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "COMMON OPTIONS:" << std::endl;
+        std::cout << "    --db PLUGIN             Database plugin name (required)" << std::endl;
+        std::cout << "    --db-path PATH          Database file path [legacy]" << std::endl;
         std::cout << std::endl;
 
         std::cout << "EXECUTE OPTIONS:" << std::endl;
-        std::cout << "  -s, --strategy NAME     Strategy name (required)" << std::endl;
+        std::cout << "  -s, --strategy PLUGIN   Strategy plugin name (required)" << std::endl;
         std::cout << "  -p, --portfolio NAME    Portfolio name (required)" << std::endl;
         std::cout << "  --from DATE             Start date YYYY-MM-DD (required)" << std::endl;
         std::cout << "  --to DATE               End date YYYY-MM-DD (required)" << std::endl;
-        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path" << std::endl;
-        std::cout << "  -P, --param KEY:VALUE   Strategy parameter" << std::endl;
+        std::cout << "  -P, --param KEY:VALUE   Strategy parameters" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "AVAILABLE PARAMETERS:" << std::endl;
-        std::cout << "  calendar:INSTRUMENT     Trading calendar reference (default: IMOEX)" << std::endl;
-        std::cout << "  inflation:INSTRUMENT    Inflation adjustment (default: INF)" << std::endl;
-        std::cout << std::endl;
+        // ═════════════════════════════════════════════════════════════════════
+        // НОВОЕ: Динамический вывод опций плагинов
+        // ═════════════════════════════════════════════════════════════════════
 
-        std::cout << "EXAMPLES:" << std::endl;
+        printPluginOptions(cmd.pluginNames, "strategy", "execute");
+
+        std::cout << "\nEXAMPLES:" << std::endl;
         std::cout << "  portfolio strategy list" << std::endl;
-        std::cout << "  portfolio strategy info -s buyhold_strategy" << std::endl;
-        std::cout << "  portfolio strategy execute -s buyhold_strategy -p MyPort \\" << std::endl;
-        std::cout << "    --from 2024-01-01 --to 2024-12-31 \\" << std::endl;
-        std::cout << "    --db sqlite_db --db-path=./market.db \\" << std::endl;
-        std::cout << "    -P calendar:RTSI -P inflation:CPI" << std::endl;
+        std::cout << "  portfolio strategy execute -s buyhold -p MyPortfolio \\" << std::endl;
+        std::cout << "    --from 2024-01-01 --to 2024-12-31 --db sqlite_db" << std::endl;
         std::cout << std::endl;
-        std::cout << "Note: Command-line -P overrides saved portfolio parameters." << std::endl;
+
+        std::cout << "SEE ALSO:" << std::endl;
+        std::cout << "  portfolio plugin list strategy         List available strategies" << std::endl;
+        std::cout << "  portfolio help strategy --with buyhold  Show strategy options" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "source") {
@@ -722,24 +758,29 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << std::endl;
 
         std::cout << "OPTIONS:" << std::endl;
-        std::cout << "  --db TYPE               Database type (inmemory_db, sqlite_db)" << std::endl;
-        std::cout << "  --db-path PATH          Database file path" << std::endl;
+        std::cout << "    --db PLUGIN             Database plugin name (required)" << std::endl;
+        std::cout << "    --db-path PATH          Database file path [legacy]" << std::endl;
         std::cout << std::endl;
 
-        std::cout << "EXAMPLES:" << std::endl;
-        std::cout << "  portfolio source list" << std::endl;
-        std::cout << "  portfolio source list --db sqlite_db --db-path=./market.db" << std::endl;
+        // ═════════════════════════════════════════════════════════════════════
+        // НОВОЕ: Динамический вывод опций плагинов
+        // ═════════════════════════════════════════════════════════════════════
+
+        printPluginOptions(cmd.pluginNames, "source");
+
+        std::cout << "\nEXAMPLES:" << std::endl;
+        std::cout << "  portfolio source list --db inmemory_db" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else if (topic == "plugin") {
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: plugin" << std::endl;
-        std::cout << "Manage system plugins" << std::endl;
+        std::cout << "Manage and inspect plugins" << std::endl;
         std::cout << std::string(70, '=') << std::endl << std::endl;
 
         std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  list [TYPE]             List plugins (database, strategy)" << std::endl;
-        std::cout << "  info NAME               Show detailed plugin information" << std::endl;
+        std::cout << "  list [TYPE]             List all plugins or filter by type" << std::endl;
+        std::cout << "  info NAME               Show plugin information" << std::endl;
         std::cout << std::endl;
 
         std::cout << "LIST OPTIONS:" << std::endl;
@@ -750,6 +791,12 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  --name NAME             Plugin name (system name)" << std::endl;
         std::cout << std::endl;
 
+        std::cout << "PLUGIN TYPES:" << std::endl;
+        std::cout << "  datasource              Data source plugins (CSV, JSON, API, etc.)" << std::endl;
+        std::cout << "  database                Database plugins (SQLite, InMemory, etc.)" << std::endl;
+        std::cout << "  strategy                Strategy plugins (BuyHold, etc.)" << std::endl;
+        std::cout << std::endl;
+
         std::cout << "EXAMPLES:" << std::endl;
         std::cout << "  # List all plugins" << std::endl;
         std::cout << "  portfolio plugin list" << std::endl;
@@ -758,13 +805,15 @@ void CommandExecutor::printHelp(std::string_view topic)
         std::cout << "  portfolio plugin list database" << std::endl;
         std::cout << "  portfolio plugin list --type database" << std::endl;
         std::cout << std::endl;
-        std::cout << "  # List only strategy plugins" << std::endl;
-        std::cout << "  portfolio plugin list strategy" << std::endl;
-        std::cout << std::endl;
         std::cout << "  # Show plugin information" << std::endl;
         std::cout << "  portfolio plugin info sqlite_db" << std::endl;
         std::cout << "  portfolio plugin info buyhold_strategy" << std::endl;
-        std::cout << "  portfolio plugin info --name inmemory_db" << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "NOTE:" << std::endl;
+        std::cout << "  Use 'portfolio help <command> --with <plugin>' to see plugin-specific" << std::endl;
+        std::cout << "  options for a command. For example:" << std::endl;
+        std::cout << "  portfolio help load --with csv --with sqlite_db" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
     } else {
@@ -775,14 +824,6 @@ void CommandExecutor::printHelp(std::string_view topic)
     std::cout << std::endl;
 }
 
-void CommandExecutor::printVersion() const
-{
-    std::cout << "\n" << std::string(50, '=') << std::endl;
-    std::cout << "Portfolio Management System" << std::endl;
-    std::cout << "Version: 1.0.0" << std::endl;
-    std::cout << "Build Date: " << __DATE__ << std::endl;
-    std::cout << std::string(50, '=') << "\n" << std::endl;
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Instrument Management
@@ -2111,7 +2152,7 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
             std::string sourceSpec = mapping.substr(pos + 1);
 
             // Для CSV плагина конвертируем 1-based в 0-based
-            if (pluginName == "csv") {
+//            if (pluginName == "csv") {
                 try {
                     std::size_t columnNum = std::stoull(sourceSpec);
                     if (columnNum == 0) {
@@ -2124,7 +2165,7 @@ std::expected<void, std::string> CommandExecutor::executeLoad(
                     return std::unexpected(
                         "Invalid column number in mapping '" + mapping + "'");
                 }
-            }
+ //          }
 
             auto addResult = dataSource->addAttributeRequest(attrName, sourceSpec);
             if (!addResult) {
@@ -2639,59 +2680,5 @@ std::expected<void, std::string> CommandExecutor::executePluginInfo(
     return {};
 }
 
-
-void CommandExecutor::printTaxResults(
-    const IPortfolioStrategy::BacktestResult& result) const
-{
-    if (result.totalTaxesPaid == 0.0) {
-        return;
-    }
-
-    const auto& tax = result.taxSummary;
-
-    std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "НАЛОГИ (НДФЛ 13%)" << std::endl;
-    std::cout << std::string(70, '=') << std::endl;
-    std::cout << std::fixed << std::setprecision(2);
-
-    std::cout << "\nПрирост капитала:" << std::endl;
-    std::cout << "  Прибыль:           ₽" << tax.totalGains << std::endl;
-    std::cout << "  Убытки:            ₽" << tax.totalLosses << std::endl;
-
-    if (tax.exemptGain > 0.0) {
-        std::cout << "  Льгота 3+ года:    ₽" << tax.exemptGain
-                  << " (" << tax.exemptTransactions << " сделок)" << std::endl;
-    }
-
-    if (tax.carryforwardUsed > 0.0) {
-        std::cout << "  Перенос прошлых убытков: ₽" << tax.carryforwardUsed << std::endl;
-    }
-
-    std::cout << "  Чистая прибыль:    ₽" << tax.netGain << std::endl;
-    std::cout << "  Налог:             ₽" << tax.capitalGainsTax << std::endl;
-
-    if (tax.carryforwardLoss > 0.0) {
-        std::cout << "\nПеренос убытков на следующий год: ₽"
-                  << tax.carryforwardLoss << std::endl;
-    }
-
-    if (tax.totalDividends > 0.0) {
-        std::cout << "\nДивиденды:" << std::endl;
-        std::cout << "  Получено:          ₽" << tax.totalDividends << std::endl;
-        std::cout << "  Налог:             ₽" << tax.dividendTax << std::endl;
-    }
-
-    std::cout << "\nИтого:" << std::endl;
-    std::cout << "  Всего налогов:     ₽" << result.totalTaxesPaid << std::endl;
-    std::cout << "  После налогов:     ₽" << result.afterTaxFinalValue << std::endl;
-    std::cout << "  Доходность:        " << result.afterTaxReturn << "%" << std::endl;
-    std::cout << "  Эффективность:     " << result.taxEfficiency << "%" << std::endl;
-
-    std::cout << "\nСтатистика:" << std::endl;
-    std::cout << "  Прибыльных:        " << tax.profitableTransactions << std::endl;
-    std::cout << "  Убыточных:         " << tax.losingTransactions << std::endl;
-
-    std::cout << std::string(70, '=') << "\n" << std::endl;
-}
 
 } // namespace portfolio

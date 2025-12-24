@@ -2,6 +2,7 @@
 #include "CommandExecutor.hpp"
 #include "CommandLineParser.hpp"
 #include <memory>
+#include <stdlib.h>
 
 using namespace portfolio;
 
@@ -10,6 +11,7 @@ protected:
     void SetUp() override {
         executor = std::make_unique<CommandExecutor>();
         // Убрали ensureDatabase из SetUp - каждый тест сам инициализирует БД
+        setenv("PORTFOLIO_PLUGIN_PATH","../plugins/",1);
     }
 
     std::unique_ptr<CommandExecutor> executor;

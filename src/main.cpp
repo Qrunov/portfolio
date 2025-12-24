@@ -22,18 +22,21 @@ int main(int argc, char** argv)
             std::make_shared<PluginManager<IDataSource>>(searchPath);
 
         // ═════════════════════════════════════════════════════════════════════
-        // НОВОЕ: Инициализация PluginManager для баз данных
+        // Инициализация PluginManager для баз данных
         // ═════════════════════════════════════════════════════════════════════
 
         auto databasePluginManager =
             std::make_shared<PluginManager<IPortfolioDatabase>>(searchPath);
 
         // ═════════════════════════════════════════════════════════════════════
-        // Создание парсера с доступом к плагинам
+        // НОВОЕ: Создание парсера с доступом к плагинам
         // ═════════════════════════════════════════════════════════════════════
 
-        CommandLineParser parser(dataSourcePluginManager, databasePluginManager);
-        auto parseResult = parser.parse(argc, argv);
+        auto parser = std::make_shared<CommandLineParser>(
+            dataSourcePluginManager,
+            databasePluginManager);
+
+        auto parseResult = parser->parse(argc, argv);
 
         if (!parseResult) {
             std::cerr << "Parse error: " << parseResult.error() << std::endl;
@@ -43,10 +46,13 @@ int main(int argc, char** argv)
         const auto& cmd = parseResult.value();
 
         // ═════════════════════════════════════════════════════════════════════
-        // Выполнение команды
+        // НОВОЕ: Создание executor и установка парсера для доступа к опциям
+        // плагинов в справке
         // ═════════════════════════════════════════════════════════════════════
 
         CommandExecutor executor;
+        executor.setCommandLineParser(parser);  // Для динамической загрузки опций
+
         auto execResult = executor.execute(cmd);
 
         if (!execResult) {

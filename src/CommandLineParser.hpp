@@ -19,23 +19,41 @@ struct ParsedCommand {
     std::string subcommand;
     po::variables_map options;
     std::vector<std::string> positional;
+    std::vector<std::string> pluginNames;  // Плагины из опции --with для справки
 };
 
 class CommandLineParser {
 public:
-    // ОБНОВЛЕНО: Добавлен параметр databasePluginManager
     explicit CommandLineParser(
         std::shared_ptr<PluginManager<IDataSource>> dataSourcePluginManager = nullptr,
         std::shared_ptr<PluginManager<IPortfolioDatabase>> databasePluginManager = nullptr);
 
     std::expected<ParsedCommand, std::string> parse(int argc, char* argv[]);
 
-    // ИЗМЕНЕНО: Убран static, теперь это обычные методы класса
+    // Методы создания базовых описаний опций (без опций плагинов)
     po::options_description createInstrumentOptions();
     po::options_description createPortfolioOptions();
     po::options_description createStrategyOptions();
     po::options_description createSourceOptions();
     po::options_description createPluginOptions();
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Методы для динамической загрузки опций плагинов в справке
+    // ═════════════════════════════════════════════════════════════════════════
+
+    // Получить опции конкретного плагина по имени
+    std::expected<po::options_description, std::string> getPluginOptions(
+        std::string_view pluginName);
+
+    // Проверить использует ли команда плагин данного типа
+    bool commandUsesPluginType(
+        std::string_view command,
+        std::string_view subcommand,
+        std::string_view pluginType) const noexcept;
+
+    // Получить тип плагина по имени (datasource, database, strategy)
+    std::expected<std::string, std::string> getPluginType(
+        std::string_view pluginName) const noexcept;
 
 private:
     std::shared_ptr<PluginManager<IDataSource>> dataSourcePluginManager_;

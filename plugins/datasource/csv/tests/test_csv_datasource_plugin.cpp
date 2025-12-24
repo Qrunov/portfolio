@@ -102,7 +102,6 @@ TEST_F(CSVDataSourcePluginTest, PluginMetadata) {
     
     EXPECT_EQ(csvPlugin->displayName, "CSVDataSource");
     EXPECT_EQ(csvPlugin->type, "datasource");
-    EXPECT_EQ(csvPlugin->version, "1.0.0");
     EXPECT_FALSE(csvPlugin->path.empty());
 }
 

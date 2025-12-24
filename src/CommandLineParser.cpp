@@ -1,6 +1,7 @@
 #include "CommandLineParser.hpp"
 #include <iostream>
 #include <sstream>
+#include <set>
 
 namespace portfolio {
 
@@ -24,14 +25,26 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(
     result.command = argv[1];
 
     try {
-        // Проверка глобального help
+        // ═════════════════════════════════════════════════════════════════════
+        // Проверка глобального help с обработкой --with
+        // ═════════════════════════════════════════════════════════════════════
+
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "help" || arg == "--help" || arg == "-h") {
                 if (i == 1) {
                     result.command = "help";
+                    // Собираем позиционные аргументы и опции --with
                     for (int j = 2; j < argc; ++j) {
-                        result.positional.push_back(argv[j]);
+                        std::string currentArg = argv[j];
+                        if (currentArg == "--with") {
+                            if (j + 1 < argc) {
+                                result.pluginNames.push_back(argv[j + 1]);
+                                ++j;  // Пропускаем имя плагина
+                            }
+                        } else if (currentArg[0] != '-') {
+                            result.positional.push_back(currentArg);
+                        }
                     }
                 } else {
                     result.positional.push_back(result.command);
@@ -39,7 +52,43 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(
                     if (argc > 2 && argv[2][0] != '-') {
                         result.positional.push_back(argv[2]);
                     }
+                    // Обработка --with для вложенной справки
+                    for (int j = 3; j < argc; ++j) {
+                        std::string currentArg = argv[j];
+                        if (currentArg == "--with") {
+                            if (j + 1 < argc) {
+                                result.pluginNames.push_back(argv[j + 1]);
+                                ++j;
+                            }
+                        }
+                    }
                 }
+
+                // Валидация --with: не более 3 плагинов
+                if (result.pluginNames.size() > 3) {
+                    return std::unexpected("Too many --with options (maximum 3)");
+                }
+
+                // Валидация --with: проверка дубликатов типов
+                if (!result.pluginNames.empty()) {
+                    std::map<std::string, std::string> typeToPlugin;
+                    for (const auto& pluginName : result.pluginNames) {
+                        auto typeResult = getPluginType(pluginName);
+                        if (!typeResult) {
+                            return std::unexpected("Unknown plugin: " + pluginName);
+                        }
+                        const auto& pluginType = typeResult.value();
+                        if (typeToPlugin.count(pluginType)) {
+                            std::ostringstream oss;
+                            oss << "Multiple plugins of the same type specified: "
+                                << typeToPlugin[pluginType] << " and " << pluginName
+                                << " are both " << pluginType << " plugins";
+                            return std::unexpected(oss.str());
+                        }
+                        typeToPlugin[pluginType] = pluginName;
+                    }
+                }
+
                 return result;
             }
         }
@@ -135,18 +184,15 @@ std::expected<ParsedCommand, std::string> CommandLineParser::parse(
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Create Load Options - С ДИНАМИЧЕСКОЙ ЗАГРУЗКОЙ ОПЦИЙ ПЛАГИНОВ
+// Create Load Options - БЕЗ динамической загрузки опций плагинов
 // ═════════════════════════════════════════════════════════════════════════════
+
 po::options_description CommandLineParser::createLoadOptions() {
     po::options_description desc("Load options");
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Базовые опции
-    // ═════════════════════════════════════════════════════════════════════════
-
     desc.add_options()
         // Выбор плагина источника данных
-        ("source,S", po::value<std::string>()->required(),
+        ("source,S", po::value<std::string>(),
          "Data source plugin name (e.g., csv, json, api)")
 
         // Обратная совместимость: --file как синоним --source csv --csv-file
@@ -172,7 +218,7 @@ po::options_description CommandLineParser::createLoadOptions() {
          "Attribute mapping (attribute:source_id) [legacy, use plugin-specific options]")
 
         // Опции базы данных
-        ("db", po::value<std::string>()->required(),
+        ("db", po::value<std::string>(),
          "Database plugin name (e.g., sqlite_db, inmemory_db)")
 
         // LEGACY: Обратная совместимость
@@ -181,54 +227,11 @@ po::options_description CommandLineParser::createLoadOptions() {
 
         ("help,h", "Show help message");
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Динамическая загрузка опций плагинов источников данных
-    // ═════════════════════════════════════════════════════════════════════════
-
-    if (dataSourcePluginManager_) {
-        try {
-            // Получаем метаданные всех доступных datasource плагинов
-            auto allMetadata = dataSourcePluginManager_->getAllPluginMetadata();
-
-            for (const auto& metadata : allMetadata) {
-                // Если плагин предоставляет опции командной строки
-                if (metadata.commandLineOptions) {
-                    // Добавляем опции плагина в общее описание
-                    desc.add(*metadata.commandLineOptions);
-                }
-            }
-        } catch (const std::exception& e) {
-            // Если не удалось загрузить опции, продолжаем без них
-            // Это не критично - опции могут отсутствовать у старых плагинов
-        }
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Динамическая загрузка опций плагинов базы данных
-    // ═════════════════════════════════════════════════════════════════════════
-
-    if (databasePluginManager_) {
-        try {
-            // Получаем метаданные всех доступных database плагинов
-            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
-
-            for (const auto& metadata : allMetadata) {
-                // Если плагин предоставляет опции командной строки
-                if (metadata.commandLineOptions) {
-                    // Добавляем опции плагина в общее описание
-                    desc.add(*metadata.commandLineOptions);
-                }
-            }
-        } catch (const std::exception& e) {
-            // Если не удалось загрузить опции, продолжаем без них
-            // Это не критично - опции могут отсутствовать у старых плагинов
-        }
-    }
-
     return desc;
 }
+
 // ═════════════════════════════════════════════════════════════════════════════
-// Instrument Options
+// Instrument Options - БЕЗ динамической загрузки опций плагинов
 // ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createInstrumentOptions() {
@@ -246,7 +249,7 @@ po::options_description CommandLineParser::createInstrumentOptions() {
         ("confirm", po::bool_switch()->default_value(false),
          "Confirm deletion")
 
-        ("db", po::value<std::string>()->required(),
+        ("db", po::value<std::string>(),
          "Database plugin name (e.g., sqlite_db, inmemory_db)")
 
         // LEGACY: Обратная совместимость
@@ -255,28 +258,11 @@ po::options_description CommandLineParser::createInstrumentOptions() {
 
         ("help,h", "Show help message");
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Динамическая загрузка опций database плагинов
-    // ═════════════════════════════════════════════════════════════════════════
-
-    if (databasePluginManager_) {
-        try {
-            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
-            for (const auto& metadata : allMetadata) {
-                if (metadata.commandLineOptions) {
-                    desc.add(*metadata.commandLineOptions);
-                }
-            }
-        } catch (const std::exception& e) {
-            // Не критично - продолжаем без динамических опций
-        }
-    }
-
     return desc;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Portfolio Options
+// Portfolio Options - БЕЗ динамической загрузки опций плагинов
 // ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createPortfolioOptions() {
@@ -407,13 +393,13 @@ po::options_description CommandLineParser::createStrategyOptions() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Source Options
+// Source Options - БЕЗ динамической загрузки опций плагинов
 // ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createSourceOptions() {
     po::options_description desc("Source options");
     desc.add_options()
-        ("db", po::value<std::string>()->required(),
+        ("db", po::value<std::string>(),
          "Database plugin name")
 
         // LEGACY
@@ -422,28 +408,11 @@ po::options_description CommandLineParser::createSourceOptions() {
 
         ("help,h", "Show help message");
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Динамическая загрузка опций database плагинов
-    // ═════════════════════════════════════════════════════════════════════════
-
-    if (databasePluginManager_) {
-        try {
-            auto allMetadata = databasePluginManager_->getAllPluginMetadata();
-            for (const auto& metadata : allMetadata) {
-                if (metadata.commandLineOptions) {
-                    desc.add(*metadata.commandLineOptions);
-                }
-            }
-        } catch (const std::exception& e) {
-            // Не критично
-        }
-    }
-
     return desc;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Plugin Options (без изменений)
+// Plugin Options
 // ═════════════════════════════════════════════════════════════════════════════
 
 po::options_description CommandLineParser::createPluginOptions() {
@@ -466,6 +435,105 @@ po::options_description CommandLineParser::createCommonOptions() {
         ("verbose,v", po::bool_switch()->default_value(false),
          "Verbose output");
     return desc;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// НОВЫЕ МЕТОДЫ: Динамическая загрузка опций плагинов для справки
+// ═════════════════════════════════════════════════════════════════════════════
+
+std::expected<po::options_description, std::string>
+CommandLineParser::getPluginOptions(std::string_view pluginName) {
+
+    // Пробуем найти плагин в datasource менеджере
+    if (dataSourcePluginManager_) {
+        try {
+            auto metadata = dataSourcePluginManager_->getPluginCommandLineMetadata(
+                std::string(pluginName));
+            if (metadata && metadata->commandLineOptions) {
+                return *metadata->commandLineOptions;
+            }
+        } catch (...) {
+            // Продолжаем поиск в других менеджерах
+        }
+    }
+
+    // Пробуем найти плагин в database менеджере
+    if (databasePluginManager_) {
+        try {
+            auto metadata = databasePluginManager_->getPluginCommandLineMetadata(
+                std::string(pluginName));
+            if (metadata && metadata->commandLineOptions) {
+                return *metadata->commandLineOptions;
+            }
+        } catch (...) {
+            // Плагин не найден
+        }
+    }
+
+    return std::unexpected("Plugin not found or has no command line options: " +
+                           std::string(pluginName));
+}
+
+std::expected<std::string, std::string>
+CommandLineParser::getPluginType(std::string_view pluginName) const noexcept {
+
+    // Проверяем datasource плагины
+    if (dataSourcePluginManager_) {
+        try {
+            auto metadata = dataSourcePluginManager_->getPluginCommandLineMetadata(
+                std::string(pluginName));
+            if (metadata) {
+                return std::string("datasource");
+            }
+        } catch (...) {
+            // Продолжаем поиск
+        }
+    }
+
+    // Проверяем database плагины
+    if (databasePluginManager_) {
+        try {
+            auto metadata = databasePluginManager_->getPluginCommandLineMetadata(
+                std::string(pluginName));
+            if (metadata) {
+                return std::string("database");
+            }
+        } catch (...) {
+            // Продолжаем поиск
+        }
+    }
+
+    return std::unexpected("Unknown plugin: " + std::string(pluginName));
+}
+
+bool CommandLineParser::commandUsesPluginType(
+    std::string_view command,
+    std::string_view subcommand,
+    std::string_view pluginType) const noexcept {
+
+    // Команды, использующие database плагины
+    if (pluginType == "database") {
+        if (command == "load") return true;
+        if (command == "instrument") return true;
+        if (command == "portfolio") return true;
+        if (command == "strategy") return true;
+        if (command == "source") return true;
+        return false;
+    }
+
+    // Команды, использующие datasource плагины
+    if (pluginType == "datasource") {
+        if (command == "load") return true;
+        return false;
+    }
+
+    // Команды, использующие strategy плагины
+    if (pluginType == "strategy") {
+        if (command == "strategy" && subcommand == "execute") return true;
+        return false;
+    }
+
+    return false;
 }
 
 }  // namespace portfolio

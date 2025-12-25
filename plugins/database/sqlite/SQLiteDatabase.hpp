@@ -11,9 +11,11 @@ namespace portfolio {
 
 class SQLiteDatabase : public IPortfolioDatabase {
 public:
-    // Конструктор с путем к файлу БД (для обратной совместимости)
-    explicit SQLiteDatabase(std::string_view dbPath);
+    // ═════════════════════════════════════════════════════════════════════════
+    // Конструкторы и деструктор
+    // ═════════════════════════════════════════════════════════════════════════
 
+    explicit SQLiteDatabase(std::string_view dbPath);
     ~SQLiteDatabase() override;
 
     // Disable copy
@@ -21,7 +23,7 @@ public:
     SQLiteDatabase& operator=(const SQLiteDatabase&) = delete;
 
     // ═════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Инициализация из опций командной строки
+    // Инициализация из опций командной строки
     // ═════════════════════════════════════════════════════════════════════════
 
     Result initializeFromOptions(
@@ -80,14 +82,10 @@ public:
 
     Result deleteSource(std::string_view source) override;
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Информация об инструменте и атрибутах
-    // ═════════════════════════════════════════════════════════════════════════
-
-    std::expected<IPortfolioDatabase::InstrumentInfo, std::string> getInstrument(
+    std::expected<InstrumentInfo, std::string> getInstrument(
         std::string_view instrumentId) override;
 
-    std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> listInstrumentAttributes(
+    std::expected<std::vector<AttributeInfo>, std::string> listInstrumentAttributes(
         std::string_view instrumentId) override;
 
     std::expected<std::size_t, std::string> getAttributeValueCount(
@@ -95,22 +93,46 @@ public:
         std::string_view attributeName,
         std::string_view sourceFilter = "") override;
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Диагностические методы
+    // ═════════════════════════════════════════════════════════════════════════
+
+    struct DatabaseDiagnostics {
+        std::size_t fileSizeBytes;
+        std::string fileSizeHuman;
+        std::int64_t pageCount;
+        std::int64_t pageSize;
+        std::int64_t cacheSize;
+        std::string integrityCheck;
+        bool isCorrupted;
+    };
+
+    std::expected<DatabaseDiagnostics, std::string> getDiagnostics() const;
+    Result performIntegrityCheck();
+    Result optimizeDatabase();
+
 private:
     sqlite3* db_ = nullptr;
     std::string dbPath_;
     bool initialized_ = false;
 
+    // ═════════════════════════════════════════════════════════════════════════
     // Вспомогательные методы
+    // ═════════════════════════════════════════════════════════════════════════
+
     Result createTables();
+    Result configureSQLite();
+    Result initializeDatabase(std::string_view path);
+
     std::string timePointToString(const TimePoint& tp);
     TimePoint stringToTimePoint(const std::string& str);
 
-    // Внутренняя инициализация базы данных
-    Result initializeDatabase(std::string_view path);
-
-    // Преобразование AttributeValue в строку и обратно
     std::string attributeValueToString(const AttributeValue& value);
-    AttributeValue stringToAttributeValue(const std::string& valueStr, const std::string& typeStr);
+    AttributeValue stringToAttributeValue(
+        const std::string& valueStr,
+        const std::string& typeStr);
+
+    std::string formatFileSize(std::size_t bytes) const;
 };
 
 }  // namespace portfolio

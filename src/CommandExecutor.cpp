@@ -1879,25 +1879,28 @@ std::expected<void, std::string> CommandExecutor::executeSource(const ParsedComm
 }
 
 std::expected<void, std::string> CommandExecutor::executeSourceList(
-    const ParsedCommand& cmd)  // ← ИСПРАВЛЕНО: убрали /**/
+    const ParsedCommand& cmd)
 {
     // ════════════════════════════════════════════════════════════════════════
     // Инициализация базы данных из опций командной строки
     // ════════════════════════════════════════════════════════════════════════
 
-    std::string dbType = "inmemory_db";
-    std::string dbPath;
+    // ИСПРАВЛЕНО: Используем ensureDatabaseWithOptions вместо ensureDatabase
+    // Это позволяет плагину SQLite получить опцию --sqlite-path
 
-    if (cmd.options.count("db")) {
-        dbType = cmd.options.at("db").as<std::string>();
+    auto dbTypeResult = getRequiredOption<std::string>(cmd, "db");
+    if (!dbTypeResult) {
+        return std::unexpected(
+            "Database type not specified.\n"
+            "Use --db <type> to specify database type.\n"
+            "Available types: inmemory_db, sqlite_db\n"
+            "Use 'portfolio plugin list database' to see all available database plugins.");
     }
 
-    if (cmd.options.count("db-path")) {
-        dbPath = cmd.options.at("db-path").as<std::string>();
-    }
+    const std::string& dbType = *dbTypeResult;
 
-    // Инициализируем базу данных если необходимо
-    auto dbResult = ensureDatabase(dbType, dbPath);
+    // НОВОЕ: Используем ensureDatabaseWithOptions с полными опциями
+    auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
@@ -1932,6 +1935,7 @@ std::expected<void, std::string> CommandExecutor::executeSourceList(
 
     return {};
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Load

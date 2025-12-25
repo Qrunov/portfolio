@@ -9,14 +9,12 @@ namespace portfolio {
 
 SQLiteDatabase::SQLiteDatabase(std::string_view dbPath)
     : dbPath_(dbPath), initialized_(false) {
-    // Если путь не пуст, инициализируем сразу (обратная совместимость)
     if (!dbPath.empty()) {
         auto result = initializeDatabase(dbPath);
         if (!result) {
             throw std::runtime_error("Failed to initialize database: " + result.error());
         }
     }
-    // Иначе ждем вызова initializeFromOptions()
 }
 
 SQLiteDatabase::~SQLiteDatabase() {
@@ -29,22 +27,15 @@ SQLiteDatabase::~SQLiteDatabase() {
 Result SQLiteDatabase::initializeFromOptions(
     const boost::program_options::variables_map& options) {
 
-    // Проверяем, не инициализирована ли база данных уже
     if (initialized_) {
-        return {};  // Уже инициализирована
+        return {};
     }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Шаг 1: Получение пути к БД из опций
-    // ════════════════════════════════════════════════════════════════════════
 
     std::string dbPath;
 
-    // Новый способ: --sqlite-path
     if (options.count("sqlite-path")) {
         dbPath = options.at("sqlite-path").as<std::string>();
     }
-    // Обратная совместимость: --db-path
     else if (options.count("db-path")) {
         dbPath = options.at("db-path").as<std::string>();
     }
@@ -54,25 +45,16 @@ Result SQLiteDatabase::initializeFromOptions(
             "Use --sqlite-path <path> or (legacy) --db-path <path>");
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Шаг 2: Инициализация базы данных
-    // ════════════════════════════════════════════════════════════════════════
-
     return initializeDatabase(dbPath);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// НОВЫЙ ПРИВАТНЫЙ МЕТОД: Внутренняя инициализация
-// ═════════════════════════════════════════════════════════════════════════════
-
 Result SQLiteDatabase::initializeDatabase(std::string_view path) {
     if (initialized_) {
-        return {};  // Уже инициализирована
+        return {};
     }
 
     dbPath_ = std::string(path);
 
-    // Открываем или создаем БД
     int rc = sqlite3_open(dbPath_.c_str(), &db_);
     if (rc != SQLITE_OK) {
         std::string error = "Failed to open database: ";
@@ -86,7 +68,6 @@ Result SQLiteDatabase::initializeDatabase(std::string_view path) {
         return std::unexpected(error);
     }
 
-    // Создаем таблицы если их нет
     auto createResult = createTables();
     if (!createResult) {
         sqlite3_close(db_);
@@ -97,27 +78,6 @@ Result SQLiteDatabase::initializeDatabase(std::string_view path) {
     initialized_ = true;
     return {};
 }
-
-
-/*Result SQLiteDatabase::initialize() {
-    // Создаем директорию если нужно
-    std::filesystem::path dbFilePath(dbPath_);
-    if (dbFilePath.has_parent_path()) {
-        std::filesystem::create_directories(dbFilePath.parent_path());
-    }
-
-    // Открываем/создаем базу данных
-    int rc = sqlite3_open(dbPath_.c_str(), &db_);
-    if (rc != SQLITE_OK) {
-        std::string error = sqlite3_errmsg(db_);
-        sqlite3_close(db_);
-        db_ = nullptr;
-        return std::unexpected("Failed to open database: " + error);
-    }
-
-    // Создаем таблицы если их нет
-    return createTables();
-}*/
 
 Result SQLiteDatabase::createTables() {
     const char* sql = R"(
@@ -154,7 +114,7 @@ Result SQLiteDatabase::createTables() {
         CREATE INDEX IF NOT EXISTS idx_attributes_timestamp
             ON attributes(timestamp);
 
-        CREATE INDEX IF NOT EXISTS idx_attributes_composite
+        CREATE INDEX IF NOT EXISTS idx_attributes_unique
             ON attributes(instrument_id, attribute_name, source, timestamp);
     )";
 
@@ -171,6 +131,10 @@ Result SQLiteDatabase::createTables() {
 }
 
 std::expected<std::vector<std::string>, std::string> SQLiteDatabase::listSources() {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     const char* sql = "SELECT DISTINCT source FROM instruments ORDER BY source";
 
     sqlite3_stmt* stmt;
@@ -203,6 +167,10 @@ Result SQLiteDatabase::saveInstrument(
     std::string_view type,
     std::string_view source)
 {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     const char* sql = R"(
         INSERT OR REPLACE INTO instruments (instrument_id, name, type, source)
         VALUES (?, ?, ?, ?)
@@ -233,6 +201,10 @@ Result SQLiteDatabase::saveInstrument(
 std::expected<bool, std::string> SQLiteDatabase::instrumentExists(
     std::string_view instrumentId)
 {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     const char* sql = "SELECT COUNT(*) FROM instruments WHERE instrument_id = ?";
 
     sqlite3_stmt* stmt;
@@ -257,6 +229,10 @@ std::expected<std::vector<std::string>, std::string> SQLiteDatabase::listInstrum
     std::string_view typeFilter,
     std::string_view sourceFilter)
 {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     std::string sql = "SELECT instrument_id FROM instruments WHERE 1=1";
 
     if (!typeFilter.empty()) {
@@ -306,6 +282,10 @@ Result SQLiteDatabase::saveAttribute(
     const TimePoint& timestamp,
     const AttributeValue& value)
 {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     const char* sql = R"(
         INSERT INTO attributes
         (instrument_id, attribute_name, source, timestamp, value_type, value)
@@ -354,7 +334,10 @@ Result SQLiteDatabase::saveAttributes(
     std::string_view source,
     const std::vector<std::pair<TimePoint, AttributeValue>>& values)
 {
-    // Начинаем транзакцию для массовой вставки
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     char* errMsg = nullptr;
     int rc = sqlite3_exec(db_, "BEGIN TRANSACTION", nullptr, nullptr, &errMsg);
 
@@ -364,7 +347,6 @@ Result SQLiteDatabase::saveAttributes(
         return std::unexpected("Failed to begin transaction: " + error);
     }
 
-    // Вставляем каждое значение
     for (const auto& [timestamp, value] : values) {
         auto result = saveAttribute(instrumentId, attributeName, source, timestamp, value);
         if (!result) {
@@ -373,13 +355,11 @@ Result SQLiteDatabase::saveAttributes(
         }
     }
 
-    // Фиксируем транзакцию
     rc = sqlite3_exec(db_, "COMMIT", nullptr, nullptr, &errMsg);
 
     if (rc != SQLITE_OK) {
         std::string error = errMsg ? errMsg : "Unknown error";
         sqlite3_free(errMsg);
-        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
         return std::unexpected("Failed to commit transaction: " + error);
     }
 
@@ -394,18 +374,21 @@ SQLiteDatabase::getAttributeHistory(
     const TimePoint& toDate,
     std::string_view source)
 {
-    // Если source не указан, игнорируем фильтр
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     std::string sql = R"(
         SELECT timestamp, value_type, value
         FROM attributes
         WHERE instrument_id = ? AND attribute_name = ?
-          AND timestamp >= ? AND timestamp <= ?
+          AND timestamp BETWEEN ? AND ?
     )";
 
-    // Добавляем фильтр по source если нужен
     if (!source.empty()) {
         sql += " AND source = ?";
     }
+
     sql += " ORDER BY timestamp";
 
     sqlite3_stmt* stmt;
@@ -423,26 +406,21 @@ SQLiteDatabase::getAttributeHistory(
     sqlite3_bind_text(stmt, 3, fromStr.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 4, toStr.c_str(), -1, SQLITE_TRANSIENT);
 
-    int paramIdx = 5;
     if (!source.empty()) {
-        sqlite3_bind_text(stmt, paramIdx++, source.data(), source.size(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 5, source.data(), source.size(), SQLITE_TRANSIENT);
     }
 
     std::vector<std::pair<TimePoint, AttributeValue>> result;
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        const unsigned char* timestampStr = sqlite3_column_text(stmt, 0);
-        const unsigned char* valueType = sqlite3_column_text(stmt, 1);
-        const unsigned char* valueStr = sqlite3_column_text(stmt, 2);
+        const char* timestampStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        const char* valueTypeStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        const char* valueStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
 
-        if (timestampStr && valueType && valueStr) {
-            TimePoint timestamp = stringToTimePoint(
-                reinterpret_cast<const char*>(timestampStr));
-            AttributeValue value = stringToAttributeValue(
-                reinterpret_cast<const char*>(valueStr),
-                reinterpret_cast<const char*>(valueType));
-
-            result.emplace_back(timestamp, value);
+        if (timestampStr && valueTypeStr && valueStr) {
+            TimePoint tp = stringToTimePoint(timestampStr);
+            AttributeValue val = stringToAttributeValue(valueStr, valueTypeStr);
+            result.emplace_back(tp, val);
         }
     }
 
@@ -456,28 +434,14 @@ SQLiteDatabase::getAttributeHistory(
 }
 
 Result SQLiteDatabase::deleteInstrument(std::string_view instrumentId) {
-    // Сначала удаляем ВСЕ атрибуты этого инструмента
-    const char* deleteAttrsSql = "DELETE FROM attributes WHERE instrument_id = ?";
-    sqlite3_stmt* stmtAttrs;
-    int rc = sqlite3_prepare_v2(db_, deleteAttrsSql, -1, &stmtAttrs, nullptr);
-
-    if (rc != SQLITE_OK) {
-        return std::unexpected("Failed to prepare delete attributes statement: " + std::string(sqlite3_errmsg(db_)));
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
     }
 
-    sqlite3_bind_text(stmtAttrs, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
-    rc = sqlite3_step(stmtAttrs);
-    sqlite3_finalize(stmtAttrs);
-
-    if (rc != SQLITE_DONE) {
-        return std::unexpected("Failed to delete attributes: " + std::string(sqlite3_errmsg(db_)));
-    }
-
-    // Теперь удаляем инструмент
     const char* sql = "DELETE FROM instruments WHERE instrument_id = ?";
 
     sqlite3_stmt* stmt;
-    rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
 
     if (rc != SQLITE_OK) {
         return std::unexpected("Failed to prepare statement: " + std::string(sqlite3_errmsg(db_)));
@@ -500,57 +464,10 @@ Result SQLiteDatabase::deleteInstruments(
     std::string_view source,
     std::string_view type)
 {
-    // Если есть фильтры, сначала найдём инструменты и удалим их атрибуты
-    if (!source.empty() || !type.empty()) {
-
-        std::string selectSql = "SELECT instrument_id FROM instruments WHERE instrument_id = ?";
-        if (!source.empty()) selectSql += " AND source = ?";
-        if (!type.empty()) selectSql += " AND type = ?";
-
-        sqlite3_stmt* selectStmt;
-        int rc = sqlite3_prepare_v2(db_, selectSql.c_str(), -1, &selectStmt, nullptr);
-
-        if (rc != SQLITE_OK) {
-            return std::unexpected("Failed to prepare select statement: " + std::string(sqlite3_errmsg(db_)));
-        }
-
-        int paramIdx = 1;
-        sqlite3_bind_text(selectStmt, paramIdx++, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
-        if (!source.empty()) {
-            sqlite3_bind_text(selectStmt, paramIdx++, source.data(), source.size(), SQLITE_TRANSIENT);
-        }
-        if (!type.empty()) {
-            sqlite3_bind_text(selectStmt, paramIdx++, type.data(), type.size(), SQLITE_TRANSIENT);
-        }
-
-        // Удаляем атрибуты для каждого найденного инструмента
-        const char* deleteAttrsSql = "DELETE FROM attributes WHERE instrument_id = ?";
-        sqlite3_stmt* stmtAttrs;
-        rc = sqlite3_prepare_v2(db_, deleteAttrsSql, -1, &stmtAttrs, nullptr);
-
-        while (sqlite3_step(selectStmt) == SQLITE_ROW) {
-            const unsigned char* id = sqlite3_column_text(selectStmt, 0);
-            if (id) {
-                sqlite3_bind_text(stmtAttrs, 1, reinterpret_cast<const char*>(id), -1, SQLITE_TRANSIENT);
-                sqlite3_step(stmtAttrs);
-                sqlite3_reset(stmtAttrs);
-            }
-        }
-
-        sqlite3_finalize(stmtAttrs);
-        sqlite3_finalize(selectStmt);
-    } else {
-        // Если нет фильтров, просто удаляем все атрибуты инструмента
-        const char* deleteAttrsSql = "DELETE FROM attributes WHERE instrument_id = ?";
-        sqlite3_stmt* stmtAttrs;
-        int rc = sqlite3_prepare_v2(db_, deleteAttrsSql, -1, &stmtAttrs, nullptr);
-
-        sqlite3_bind_text(stmtAttrs, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
-        sqlite3_step(stmtAttrs);
-        sqlite3_finalize(stmtAttrs);
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
     }
 
-    // Теперь удаляем инструменты
     std::string sql = "DELETE FROM instruments WHERE instrument_id = ?";
 
     if (!source.empty()) {
@@ -587,13 +504,19 @@ Result SQLiteDatabase::deleteInstruments(
     return {};
 }
 
-
-
 Result SQLiteDatabase::deleteAttributes(
     std::string_view instrumentId,
     std::string_view attributeName)
 {
-    const char* sql = "DELETE FROM attributes WHERE instrument_id = ? AND attribute_name = ?";
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
+    const char* sql = R"(
+        DELETE FROM attributes
+        WHERE instrument_id = ?
+          AND attribute_name = ?
+    )";
 
     sqlite3_stmt* stmt;
     int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
@@ -616,6 +539,10 @@ Result SQLiteDatabase::deleteAttributes(
 }
 
 Result SQLiteDatabase::deleteSource(std::string_view source) {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
+    }
+
     const char* sql = "DELETE FROM instruments WHERE source = ?";
 
     sqlite3_stmt* stmt;
@@ -637,96 +564,12 @@ Result SQLiteDatabase::deleteSource(std::string_view source) {
     return {};
 }
 
-// ============================================================================
-// Вспомогательные методы
-// ============================================================================
-
-std::string SQLiteDatabase::timePointToString(const TimePoint& tp) {
-    // Конвертируем в time_t
-    std::time_t t = std::chrono::system_clock::to_time_t(tp);
-
-    // CRITICAL: Используем gmtime_r для UTC (НЕ localtime!)
-    std::tm tm;
-#ifdef _WIN32
-    gmtime_s(&tm, &t);  // Windows: gmtime_s
-#else
-    gmtime_r(&t, &tm);  // POSIX: gmtime_r
-#endif
-
-    // Форматируем как "YYYY-MM-DD 00:00:00" (с временем!)
-    std::ostringstream oss;
-    oss << std::setfill('0')
-        << std::setw(4) << (tm.tm_year + 1900) << '-'
-        << std::setw(2) << (tm.tm_mon + 1) << '-'
-        << std::setw(2) << tm.tm_mday
-        << " 00:00:00";  // ВАЖНО: добавляем время!
-
-    return oss.str();
-}
-
-
-TimePoint SQLiteDatabase::stringToTimePoint(const std::string& str) {
-    std::tm tm = {};
-    std::istringstream ss(str);
-
-    // Парсим строку формата "YYYY-MM-DD HH:MM:SS"
-    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
-
-    if (ss.fail()) {
-        // Если парсинг не удался, возвращаем epoch
-        return TimePoint{};
+std::expected<IPortfolioDatabase::InstrumentInfo, std::string>
+SQLiteDatabase::getInstrument(std::string_view instrumentId) {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
     }
 
-// CRITICAL FIX: Используем timegm/gmtime_r для UTC (НЕ mktime!)
-// mktime интерпретирует tm как LOCAL time
-// timegm интерпретирует tm как UTC
-
-#ifdef _WIN32
-    // Windows: используем _mkgmtime
-    auto time = _mkgmtime(&tm);
-#else
-    // POSIX/Linux: используем timegm
-    auto time = timegm(&tm);
-#endif
-
-    if (time == -1) {
-        // Если конвертация не удалась, возвращаем epoch
-        return TimePoint{};
-    }
-
-    return std::chrono::system_clock::from_time_t(time);
-}
-
-
-std::string SQLiteDatabase::attributeValueToString(const AttributeValue& value) {
-    if (std::holds_alternative<double>(value)) {
-        return std::to_string(std::get<double>(value));
-    } else if (std::holds_alternative<std::int64_t>(value)) {
-        return std::to_string(std::get<std::int64_t>(value));
-    } else {
-        return std::get<std::string>(value);
-    }
-}
-
-AttributeValue SQLiteDatabase::stringToAttributeValue(
-    const std::string& str,
-    const std::string& type)
-{
-    if (type == "double") {
-        return std::stod(str);
-    } else if (type == "int64") {
-        return static_cast<std::int64_t>(std::stoll(str));
-    } else {
-        return str;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// НОВЫЕ МЕТОДЫ: Информация об инструменте и атрибутах
-// ═══════════════════════════════════════════════════════════════════════════════
-
-std::expected<IPortfolioDatabase::InstrumentInfo, std::string> SQLiteDatabase::getInstrument(std::string_view instrumentId)
-{
     const char* sql = R"(
         SELECT instrument_id, name, type, source
         FROM instruments
@@ -737,40 +580,30 @@ std::expected<IPortfolioDatabase::InstrumentInfo, std::string> SQLiteDatabase::g
     int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
 
     if (rc != SQLITE_OK) {
-        return std::unexpected("Failed to prepare statement: " +
-                               std::string(sqlite3_errmsg(db_)));
+        return std::unexpected("Failed to prepare statement: " + std::string(sqlite3_errmsg(db_)));
     }
 
     sqlite3_bind_text(stmt, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
 
-    rc = sqlite3_step(stmt);
-
-    if (rc != SQLITE_ROW) {
+    InstrumentInfo info;
+    if ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        info.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        info.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        info.type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        info.source = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+    } else {
         sqlite3_finalize(stmt);
-        if (rc == SQLITE_DONE) {
-            return std::unexpected("Instrument not found: " + std::string(instrumentId));
-        }
-        return std::unexpected("Error reading instrument: " +
-                               std::string(sqlite3_errmsg(db_)));
+        return std::unexpected("Instrument not found: " + std::string(instrumentId));
     }
 
-    InstrumentInfo info;
-    info.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-    info.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-    info.type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-    info.source = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-
     sqlite3_finalize(stmt);
-
     return info;
 }
 
-std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> SQLiteDatabase::listInstrumentAttributes(std::string_view instrumentId)
-{
-    // Сначала проверяем существование инструмента
-    auto instCheck = instrumentExists(instrumentId);
-    if (!instCheck || !instCheck.value()) {
-        return std::unexpected("Instrument not found: " + std::string(instrumentId));
+std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string>
+SQLiteDatabase::listInstrumentAttributes(std::string_view instrumentId) {
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
     }
 
     const char* sql = R"(
@@ -790,49 +623,46 @@ std::expected<std::vector<IPortfolioDatabase::AttributeInfo>, std::string> SQLit
     int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
 
     if (rc != SQLITE_OK) {
-        return std::unexpected("Failed to prepare statement: " +
-                               std::string(sqlite3_errmsg(db_)));
+        return std::unexpected("Failed to prepare statement: " + std::string(sqlite3_errmsg(db_)));
     }
 
     sqlite3_bind_text(stmt, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
 
-    std::vector<AttributeInfo> result;
-
+    std::vector<AttributeInfo> attributes;
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         AttributeInfo info;
-
         info.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
         info.source = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
         info.valueCount = sqlite3_column_int64(stmt, 2);
 
-        const char* firstTimeStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-        const char* lastTimeStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+        const char* firstTimestampStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        const char* lastTimestampStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
 
-        info.firstTimestamp = stringToTimePoint(firstTimeStr);
-        info.lastTimestamp = stringToTimePoint(lastTimeStr);
+        if (firstTimestampStr && lastTimestampStr) {
+            info.firstTimestamp = stringToTimePoint(firstTimestampStr);
+            info.lastTimestamp = stringToTimePoint(lastTimestampStr);
+        }
 
-        result.push_back(info);
+        attributes.push_back(info);
     }
 
     sqlite3_finalize(stmt);
 
     if (rc != SQLITE_DONE) {
-        return std::unexpected("Error reading attributes: " +
-                               std::string(sqlite3_errmsg(db_)));
+        return std::unexpected("Error reading attributes: " + std::string(sqlite3_errmsg(db_)));
     }
 
-    return result;
+    return attributes;
 }
 
-std::expected<std::size_t, std::string> SQLiteDatabase::getAttributeValueCount(
+std::expected<std::size_t, std::string>
+SQLiteDatabase::getAttributeValueCount(
     std::string_view instrumentId,
     std::string_view attributeName,
     std::string_view sourceFilter)
 {
-    // Проверяем существование инструмента
-    auto instCheck = instrumentExists(instrumentId);
-    if (!instCheck || !instCheck.value()) {
-        return std::unexpected("Instrument not found: " + std::string(instrumentId));
+    if (!initialized_ || !db_) {
+        return std::unexpected("Database not initialized");
     }
 
     std::string sql = R"(
@@ -849,8 +679,7 @@ std::expected<std::size_t, std::string> SQLiteDatabase::getAttributeValueCount(
     int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
 
     if (rc != SQLITE_OK) {
-        return std::unexpected("Failed to prepare statement: " +
-                               std::string(sqlite3_errmsg(db_)));
+        return std::unexpected("Failed to prepare statement: " + std::string(sqlite3_errmsg(db_)));
     }
 
     sqlite3_bind_text(stmt, 1, instrumentId.data(), instrumentId.size(), SQLITE_TRANSIENT);
@@ -860,23 +689,75 @@ std::expected<std::size_t, std::string> SQLiteDatabase::getAttributeValueCount(
         sqlite3_bind_text(stmt, 3, sourceFilter.data(), sourceFilter.size(), SQLITE_TRANSIENT);
     }
 
-    rc = sqlite3_step(stmt);
-
     std::size_t count = 0;
-    if (rc == SQLITE_ROW) {
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
         count = sqlite3_column_int64(stmt, 0);
     }
 
     sqlite3_finalize(stmt);
-
-    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
-        return std::unexpected("Error counting attributes: " +
-                               std::string(sqlite3_errmsg(db_)));
-    }
-
     return count;
 }
 
+std::string SQLiteDatabase::timePointToString(const TimePoint& tp) {
+    std::time_t t = std::chrono::system_clock::to_time_t(tp);
 
+    std::tm tm;
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
 
-} // namespace portfolio
+    std::ostringstream oss;
+    oss << std::setfill('0')
+        << std::setw(4) << (tm.tm_year + 1900) << '-'
+        << std::setw(2) << (tm.tm_mon + 1) << '-'
+        << std::setw(2) << tm.tm_mday
+        << " 00:00:00";
+
+    return oss.str();
+}
+
+TimePoint SQLiteDatabase::stringToTimePoint(const std::string& str) {
+    std::tm tm = {};
+    std::istringstream ss(str);
+
+    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+
+    if (ss.fail()) {
+        return TimePoint{};
+    }
+
+#ifdef _WIN32
+    std::time_t t = _mkgmtime(&tm);
+#else
+    std::time_t t = timegm(&tm);
+#endif
+
+    return std::chrono::system_clock::from_time_t(t);
+}
+
+std::string SQLiteDatabase::attributeValueToString(const AttributeValue& value) {
+    if (std::holds_alternative<double>(value)) {
+        return std::to_string(std::get<double>(value));
+    } else if (std::holds_alternative<std::int64_t>(value)) {
+        return std::to_string(std::get<std::int64_t>(value));
+    } else {
+        return std::get<std::string>(value);
+    }
+}
+
+AttributeValue SQLiteDatabase::stringToAttributeValue(
+    const std::string& valueStr,
+    const std::string& typeStr)
+{
+    if (typeStr == "double") {
+        return std::stod(valueStr);
+    } else if (typeStr == "int64") {
+        return static_cast<std::int64_t>(std::stoll(valueStr));
+    } else {
+        return valueStr;
+    }
+}
+
+}  // namespace portfolio

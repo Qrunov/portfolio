@@ -614,50 +614,100 @@ void CommandExecutor::printHelp(const ParsedCommand& cmd)
         std::cout << "  portfolio help load --with csv       Show CSV plugin options" << std::endl;
         std::cout << std::string(70, '=') << std::endl;
 
-    } else if (topic == "instrument") {
-        std::cout << "\n" << std::string(70, '=') << std::endl;
-        std::cout << "COMMAND: instrument" << std::endl;
-        std::cout << "Manage financial instruments" << std::endl;
-        std::cout << std::string(70, '=') << std::endl << std::endl;
+    }else if (topic == "instrument") {
+            std::cout << "\n" << std::string(70, '=') << std::endl;
+            std::cout << "COMMAND: instrument" << std::endl;
+            std::cout << "Manage financial instruments in the database" << std::endl;
+            std::cout << std::string(70, '=') << std::endl << std::endl;
 
-        std::cout << "SUBCOMMANDS:" << std::endl;
-        std::cout << "  list                    List all instruments" << std::endl;
-        std::cout << "  show -t ID              Show instrument details" << std::endl;
-        std::cout << "  delete -t ID            Delete an instrument" << std::endl;
-        std::cout << std::endl;
+            std::cout << "SUBCOMMANDS:" << std::endl;
+            std::cout << "  list                    List all instruments (with optional filters)" << std::endl;
+            std::cout << "  show -t ID              Show detailed instrument information" << std::endl;
+            std::cout << "  delete [OPTIONS]        Delete instrument(s) by various criteria" << std::endl;
+            std::cout << std::endl;
 
-        std::cout << "COMMON OPTIONS:" << std::endl;
-        std::cout << "    --db PLUGIN             Database plugin name (required)" << std::endl;
-        std::cout << "    --db-path PATH          Database file path [legacy]" << std::endl;
-        std::cout << std::endl;
+            std::cout << "COMMON OPTIONS:" << std::endl;
+            std::cout << "    --db PLUGIN             Database plugin name (required)" << std::endl;
+            std::cout << "    --db-path PATH          Database file path [legacy]" << std::endl;
+            std::cout << std::endl;
 
-        std::cout << "LIST OPTIONS:" << std::endl;
-        std::cout << "    -s, --source SOURCE     Filter by source" << std::endl;
-        std::cout << "    --type TYPE             Filter by instrument type" << std::endl;
-        std::cout << std::endl;
+            std::cout << "LIST OPTIONS:" << std::endl;
+            std::cout << "    -s, --source SOURCE     Filter by source" << std::endl;
+            std::cout << "    --type TYPE             Filter by instrument type" << std::endl;
+            std::cout << std::endl;
 
-        std::cout << "SHOW/DELETE OPTIONS:" << std::endl;
-        std::cout << "    -t, --instrument-id ID  Instrument ID (required)" << std::endl;
-        std::cout << "    --confirm               Confirm deletion (for delete command)" << std::endl;
-        std::cout << std::endl;
+            std::cout << "SHOW OPTIONS:" << std::endl;
+            std::cout << "    -t, --instrument-id ID  Instrument ID (required)" << std::endl;
+            std::cout << std::endl;
 
-        // ═════════════════════════════════════════════════════════════════════
-        // НОВОЕ: Динамический вывод опций плагинов
-        // ═════════════════════════════════════════════════════════════════════
+            std::cout << "DELETE OPTIONS:" << std::endl;
+            std::cout << "    -t, --instrument-id ID  Delete specific instrument by ID" << std::endl;
+            std::cout << "    -s, --source SOURCE     Delete all instruments from source" << std::endl;
+            std::cout << "    --type TYPE             Delete all instruments of type" << std::endl;
+            std::cout << "    --confirm               Confirm deletion (REQUIRED)" << std::endl;
+            std::cout << std::endl;
+            std::cout << "  Note: You can combine filters. At least one criterion is required." << std::endl;
+            std::cout << "  Deletion logic: (instrument_id) AND (source) AND (type)" << std::endl;
+            std::cout << "  If a filter is not specified, it's excluded from the condition." << std::endl;
+            std::cout << std::endl;
 
-        printPluginOptions(cmd.pluginNames, "instrument");
+            // ═════════════════════════════════════════════════════════════════════
+            // Динамический вывод опций плагинов
+            // ═════════════════════════════════════════════════════════════════════
 
-        std::cout << "\nEXAMPLES:" << std::endl;
-        std::cout << "  portfolio instrument list --db sqlite_db" << std::endl;
-        std::cout << "  portfolio instrument show -t SBER --db sqlite_db" << std::endl;
-        std::cout << "  portfolio instrument delete -t SBER --confirm --db sqlite_db" << std::endl;
-        std::cout << std::endl;
+            printPluginOptions(cmd.pluginNames, "instrument");
 
-        std::cout << "SEE ALSO:" << std::endl;
-        std::cout << "  portfolio help instrument --with sqlite_db    Show SQLite DB options" << std::endl;
-        std::cout << std::string(70, '=') << std::endl;
+            std::cout << "\nEXAMPLES:" << std::endl;
+            std::cout << "  # List all instruments" << std::endl;
+            std::cout << "  portfolio instrument list --db sqlite_db" << std::endl;
+            std::cout << std::endl;
 
-    } else if (topic == "portfolio") {
+            std::cout << "  # List instruments with filters" << std::endl;
+            std::cout << "  portfolio instrument list --type stock --db sqlite_db" << std::endl;
+            std::cout << "  portfolio instrument list --source MOEX --db sqlite_db" << std::endl;
+            std::cout << "  portfolio instrument list --type bond --source Yahoo --db sqlite_db" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "  # Show detailed information" << std::endl;
+            std::cout << "  portfolio instrument show -t SBER --db sqlite_db" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "  # Delete specific instrument" << std::endl;
+            std::cout << "  portfolio instrument delete -t SBER --confirm --db sqlite_db" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "  # Delete all instruments of a specific type" << std::endl;
+            std::cout << "  portfolio instrument delete --type stock --confirm --db sqlite_db" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "  # Delete all instruments from a specific source" << std::endl;
+            std::cout << "  portfolio instrument delete --source MOEX --confirm --db sqlite_db" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "  # Delete by combining filters (instrument AND type AND source)" << std::endl;
+            std::cout << "  portfolio instrument delete -t SBER --type stock --confirm --db sqlite_db" << std::endl;
+            std::cout << "  portfolio instrument delete --type bond --source Yahoo --confirm --db sqlite_db" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "  # Preview deletion without confirmation (safe mode)" << std::endl;
+            std::cout << "  portfolio instrument delete --type stock --db sqlite_db" << std::endl;
+            std::cout << "  (This will show what would be deleted without actually deleting)" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "DELETION BEHAVIOR:" << std::endl;
+            std::cout << "  • Requires --confirm flag to actually delete" << std::endl;
+            std::cout << "  • Without --confirm, shows preview of what would be deleted" << std::endl;
+            std::cout << "  • Deletes both instruments and their associated attributes" << std::endl;
+            std::cout << "  • At least one criterion must be specified" << std::endl;
+            std::cout << "  • Multiple filters are combined with AND logic" << std::endl;
+            std::cout << std::endl;
+
+            std::cout << "SEE ALSO:" << std::endl;
+            std::cout << "  portfolio help instrument --with sqlite_db    Show SQLite DB options" << std::endl;
+            std::cout << "  portfolio help load                          Load instrument data" << std::endl;
+            std::cout << "  portfolio source delete                       Delete entire data source" << std::endl;
+            std::cout << std::string(70, '=') << std::endl;
+        }else if (topic == "portfolio") {
         std::cout << "\n" << std::string(70, '=') << std::endl;
         std::cout << "COMMAND: portfolio" << std::endl;
         std::cout << "Manage investment portfolios" << std::endl;
@@ -1061,6 +1111,7 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentShow(
     return {};
 }
 
+
 std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
     const ParsedCommand& cmd)
 {
@@ -1079,57 +1130,182 @@ std::expected<void, std::string> CommandExecutor::executeInstrumentDelete(
 
     const std::string& dbType = *dbTypeResult;
 
-    // НОВЫЙ ПОДХОД: Используем ensureDatabaseWithOptions с полным набором опций
     auto dbResult = ensureDatabaseWithOptions(dbType, cmd.options);
     if (!dbResult) {
         return std::unexpected(dbResult.error());
     }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Получение ID инструмента
-    // ════════════════════════════════════════════════════════════════════════
-
-    auto idResult = getRequiredOption<std::string>(cmd, "instrument-id");
-    if (!idResult) {
-        return std::unexpected(idResult.error());
-    }
-
-    std::string instrumentId = idResult.value();
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Проверка инициализации базы данных
-    // ════════════════════════════════════════════════════════════════════════
 
     if (!database_) {
         return std::unexpected("Database not initialized");
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Проверка существования инструмента
+    // Извлечение параметров фильтрации
     // ════════════════════════════════════════════════════════════════════════
 
-    auto existsResult = database_->instrumentExists(instrumentId);
-    if (!existsResult) {
-        return std::unexpected(existsResult.error());
+    std::string instrumentId;
+    std::string sourceFilter;
+    std::string typeFilter;
+
+    if (cmd.options.count("instrument-id")) {
+        instrumentId = cmd.options.at("instrument-id").as<std::string>();
     }
 
-    if (!existsResult.value()) {
-        return std::unexpected("Instrument not found: " + instrumentId);
+    if (cmd.options.count("source")) {
+        sourceFilter = cmd.options.at("source").as<std::string>();
+    }
+
+    if (cmd.options.count("type")) {
+        typeFilter = cmd.options.at("type").as<std::string>();
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Удаление инструмента
+    // Валидация: должен быть указан хотя бы один критерий удаления
     // ════════════════════════════════════════════════════════════════════════
 
-    auto deleteResult = database_->deleteInstruments(instrumentId);
+    if (instrumentId.empty() && sourceFilter.empty() && typeFilter.empty()) {
+        return std::unexpected(
+            "No deletion criteria specified.\n"
+            "Use at least one of:\n"
+            "  --instrument-id, -t ID    Delete specific instrument\n"
+            "  --source SOURCE           Delete by source\n"
+            "  --type TYPE               Delete by type\n\n"
+            "Examples:\n"
+            "  portfolio instrument delete -t SBER --confirm\n"
+            "  portfolio instrument delete --type stock --confirm\n"
+            "  portfolio instrument delete --source MOEX --confirm\n"
+            "  portfolio instrument delete -t SBER --type stock --source MOEX --confirm");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Подсчет инструментов для удаления и вывод информации
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto listResult = database_->listInstruments(typeFilter, sourceFilter);
+    if (!listResult) {
+        return std::unexpected(listResult.error());
+    }
+
+    std::vector<std::string> instrumentsToDelete;
+
+    if (!instrumentId.empty()) {
+        // Если указан конкретный ID, фильтруем список
+        for (const auto& id : listResult.value()) {
+            if (id == instrumentId) {
+                instrumentsToDelete.push_back(id);
+                break;
+            }
+        }
+    } else {
+        // Удаляем все инструменты, соответствующие фильтрам
+        instrumentsToDelete = listResult.value();
+    }
+
+    if (instrumentsToDelete.empty()) {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "NO INSTRUMENTS FOUND" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+        std::cout << "No instruments match the deletion criteria:" << std::endl;
+        if (!instrumentId.empty()) {
+            std::cout << "  Instrument ID: " << instrumentId << std::endl;
+        }
+        if (!typeFilter.empty()) {
+            std::cout << "  Type:          " << typeFilter << std::endl;
+        }
+        if (!sourceFilter.empty()) {
+            std::cout << "  Source:        " << sourceFilter << std::endl;
+        }
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+        return {};
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод информации о предстоящем удалении
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::cout << "\n" << std::string(70, '=') << std::endl;
+    std::cout << "DELETION PREVIEW" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    std::cout << "The following " << instrumentsToDelete.size()
+              << " instrument(s) will be deleted:" << std::endl;
+    std::cout << std::string(70, '-') << std::endl;
+
+    for (const auto& id : instrumentsToDelete) {
+        std::cout << "  • " << id << std::endl;
+    }
+
+    std::cout << std::string(70, '-') << std::endl;
+    std::cout << "Deletion criteria:" << std::endl;
+    if (!instrumentId.empty()) {
+        std::cout << "  Instrument ID: " << instrumentId << std::endl;
+    }
+    if (!typeFilter.empty()) {
+        std::cout << "  Type:          " << typeFilter << std::endl;
+    }
+    if (!sourceFilter.empty()) {
+        std::cout << "  Source:        " << sourceFilter << std::endl;
+    }
+    std::cout << std::string(70, '=') << std::endl;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Проверка подтверждения
+    // ════════════════════════════════════════════════════════════════════════
+
+    bool confirmed = false;
+    if (cmd.options.count("confirm")) {
+        confirmed = cmd.options.at("confirm").as<bool>();
+    }
+
+    if (!confirmed) {
+        std::cout << "\n⚠️  WARNING: Deletion not confirmed!" << std::endl;
+        std::cout << "To proceed with deletion, add the --confirm flag:" << std::endl;
+        std::cout << "\n  Example:" << std::endl;
+        std::cout << "  portfolio instrument delete";
+        if (!instrumentId.empty()) {
+            std::cout << " -t " << instrumentId;
+        }
+        if (!typeFilter.empty()) {
+            std::cout << " --type " << typeFilter;
+        }
+        if (!sourceFilter.empty()) {
+            std::cout << " --source " << sourceFilter;
+        }
+        std::cout << " --confirm --db " << dbType << std::endl;
+        std::cout << std::string(70, '=') << std::endl << std::endl;
+        return {};
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Выполнение удаления
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto deleteResult = database_->deleteInstruments(
+        instrumentId,
+        typeFilter,
+        sourceFilter);
+
     if (!deleteResult) {
         return std::unexpected(deleteResult.error());
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // Вывод результата
+    // ════════════════════════════════════════════════════════════════════════
+
     std::cout << "\n" << std::string(70, '=') << std::endl;
-    std::cout << "SUCCESS" << std::endl;
+    std::cout << "✓ SUCCESS" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
-    std::cout << "Instrument '" << instrumentId << "' deleted successfully" << std::endl;
+    std::cout << "Successfully deleted " << instrumentsToDelete.size()
+              << " instrument(s)" << std::endl;
+
+    if (instrumentsToDelete.size() <= 5) {
+        std::cout << "\nDeleted instruments:" << std::endl;
+        for (const auto& id : instrumentsToDelete) {
+            std::cout << "  • " << id << std::endl;
+        }
+    }
+
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
     return {};

@@ -11,27 +11,15 @@ namespace portfolio {
 
 class SQLiteDatabase : public IPortfolioDatabase {
 public:
-    // ═════════════════════════════════════════════════════════════════════════
-    // Конструкторы и деструктор
-    // ═════════════════════════════════════════════════════════════════════════
-
     explicit SQLiteDatabase(std::string_view dbPath);
+
     ~SQLiteDatabase() override;
 
-    // Disable copy
     SQLiteDatabase(const SQLiteDatabase&) = delete;
     SQLiteDatabase& operator=(const SQLiteDatabase&) = delete;
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Инициализация из опций командной строки
-    // ═════════════════════════════════════════════════════════════════════════
-
     Result initializeFromOptions(
         const boost::program_options::variables_map& options) override;
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // IPortfolioDatabase interface
-    // ═════════════════════════════════════════════════════════════════════════
 
     std::expected<std::vector<std::string>, std::string> listSources() override;
 
@@ -72,9 +60,9 @@ public:
     Result deleteInstrument(std::string_view instrumentId) override;
 
     Result deleteInstruments(
-        std::string_view instrumentId,
-        std::string_view source = "",
-        std::string_view type = "") override;
+        std::string_view instrumentIdFilter = "",
+        std::string_view typeFilter = "",
+        std::string_view sourceFilter = "") override;
 
     Result deleteAttributes(
         std::string_view instrumentId,
@@ -93,46 +81,27 @@ public:
         std::string_view attributeName,
         std::string_view sourceFilter = "") override;
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Диагностические методы
-    // ═════════════════════════════════════════════════════════════════════════
-
-    struct DatabaseDiagnostics {
-        std::size_t fileSizeBytes;
-        std::string fileSizeHuman;
-        std::int64_t pageCount;
-        std::int64_t pageSize;
-        std::int64_t cacheSize;
-        std::string integrityCheck;
-        bool isCorrupted;
-    };
-
-    std::expected<DatabaseDiagnostics, std::string> getDiagnostics() const;
-    Result performIntegrityCheck();
-    Result optimizeDatabase();
-
 private:
     sqlite3* db_ = nullptr;
     std::string dbPath_;
     bool initialized_ = false;
 
-    // ═════════════════════════════════════════════════════════════════════════
     // Вспомогательные методы
-    // ═════════════════════════════════════════════════════════════════════════
-
     Result createTables();
-    Result configureSQLite();
-    Result initializeDatabase(std::string_view path);
-
     std::string timePointToString(const TimePoint& tp);
     TimePoint stringToTimePoint(const std::string& str);
 
-    std::string attributeValueToString(const AttributeValue& value);
-    AttributeValue stringToAttributeValue(
-        const std::string& valueStr,
-        const std::string& typeStr);
+    // Внутренняя инициализация базы данных
+    Result initializeDatabase(std::string_view path);
 
-    std::string formatFileSize(std::size_t bytes) const;
+    // Преобразование AttributeValue в строку и обратно
+    std::string attributeValueToString(const AttributeValue& value);
+    AttributeValue stringToAttributeValue(const std::string& valueStr, const std::string& typeStr);
+
+    // Работа со справочниками (нормализация)
+    std::expected<sqlite3_int64, std::string> getOrCreateType(std::string_view typeName);
+    std::expected<sqlite3_int64, std::string> getOrCreateSource(std::string_view sourceName);
+    std::expected<sqlite3_int64, std::string> getOrCreateAttributeName(std::string_view attrName);
 };
 
 }  // namespace portfolio

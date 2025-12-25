@@ -74,3 +74,12 @@ portfolio_add_test(
 )
 
 message(STATUS "  ✓ Added test: inflation_adjuster")
+
+portfolio_add_test(
+    NAME test_instrument_delete_filters
+    SOURCES test_instrument_delete_filters.cpp
+    LIBRARIES inmemory_db_impl
+)
+
+message(STATUS "  ✓ Added test: test_instrument_delete_filters")
+

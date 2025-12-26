@@ -14,9 +14,6 @@ namespace portfolio {
 // Вспомогательные структуры
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// DividendPayment определяем здесь (если не было определено ранее)
-// TaxLot уже определен в TaxCalculator.hpp (включается через IPortfolioStrategy.hpp)
-
 struct DividendPayment {
     TimePoint date;
     double amount;
@@ -24,7 +21,6 @@ struct DividendPayment {
 
 } // namespace portfolio
 
-// Включаем TradingContext ПОСЛЕ определения всех необходимых типов
 #include "TradingContext.hpp"
 
 namespace portfolio {
@@ -74,31 +70,46 @@ public:
     BasePortfolioStrategy() = default;
     ~BasePortfolioStrategy() override = default;
 
+    // ════════════════════════════════════════════════════════════════════════
+    // Dependencies
+    // ════════════════════════════════════════════════════════════════════════
+
     void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override;
     void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override;
 
-    BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
-    BasePortfolioStrategy& operator=(const BasePortfolioStrategy&) = delete;
-
     // ════════════════════════════════════════════════════════════════════════
-    // Default parameters
+    // Default Parameters
     // ════════════════════════════════════════════════════════════════════════
 
-    virtual std::map<std::string, std::string> getDefaultParameters() const;
+    std::map<std::string, std::string> getDefaultParameters() const override {
+        return {
+            {"calendar", "IMOEX"},
+            {"inflation", "INF"},
+            {"tax", "false"},
+            {"ndfl_rate", "0.13"},
+            {"long_term_exemption", "true"},
+            {"lot_method", "FIFO"},
+            {"import_losses", "0"},
+            {"risk_free_rate", "7.0"},
+            {"risk_free_instrument", ""},
+            {"rebalance_period", "0"},
+            {"source", ""}  // НОВОЕ: пустое значение = автоопределение
+        };
+    }
 
     // ════════════════════════════════════════════════════════════════════════
-    // ШАБЛОННЫЙ МЕТОД BACKTEST
+    // Template Method
     // ════════════════════════════════════════════════════════════════════════
 
-    virtual std::expected<BacktestResult, std::string> backtest(
+    std::expected<BacktestResult, std::string> backtest(
         const PortfolioParams& params,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        double initialCapital) override;
+        double initialCapital) override final;
 
 protected:
     // ════════════════════════════════════════════════════════════════════════
-    // Виртуальные методы для наследников
+    // Хуки для переопределения в подклассах
     // ════════════════════════════════════════════════════════════════════════
 
     virtual std::expected<void, std::string> initializeStrategy(
@@ -107,17 +118,6 @@ protected:
         return {};
     }
 
-    virtual std::expected<void, std::string> validateInputParameters(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) const;
-
-    virtual void printBacktestHeader(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) const;
 
     virtual std::expected<void, std::string> processTradingDay(
         TradingContext& context,
@@ -189,17 +189,26 @@ protected:
         const TimePoint& currentDate,
         const TradingContext& context) const;
 
+    // ════════════════════════════════════════════════════════════════════════
+    // НОВОЕ: Работа с источниками данных
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::expected<std::string, std::string> determineDataSource(
+        const PortfolioParams& params) const;
+
     std::expected<void, std::string> loadPriceData(
         const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        std::map<std::string, std::map<TimePoint, double>>& priceData);
+        std::map<std::string, std::map<TimePoint, double>>& priceData,
+        std::string_view dataSource = "");
 
     std::expected<void, std::string> loadDividendData(
         const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        std::map<std::string, std::vector<DividendPayment>>& dividendData);
+        std::map<std::string, std::vector<DividendPayment>>& dividendData,
+        std::string_view dataSource = "");
 
     InstrumentPriceInfo getInstrumentPriceInfo(
         const std::string& instrumentId,
@@ -240,6 +249,18 @@ protected:
     bool isLastTradingDayOfYear(
         const TimePoint& currentDate,
         const TimePoint& nextDate) const;
+
+    std::expected<void, std::string> validateInputParameters(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
+
+    void printBacktestHeader(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
 
 protected:
     std::shared_ptr<IPortfolioDatabase> database_;

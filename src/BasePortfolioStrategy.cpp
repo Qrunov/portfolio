@@ -46,7 +46,18 @@ BasePortfolioStrategy::backtest(
     printBacktestHeader(params, startDate, endDate, initialCapital);
 
     // ════════════════════════════════════════════════════════════════════════
-    // 2. Инициализация календаря
+    // 2. НОВОЕ: Определение источника данных
+    // ════════════════════════════════════════════════════════════════════════
+
+    auto dataSourceResult = determineDataSource(params);
+    if (!dataSourceResult) {
+        return std::unexpected(dataSourceResult.error());
+    }
+
+    std::string dataSource = *dataSourceResult;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 3. Инициализация календаря (БЕЗ фильтрации по источнику)
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = initializeTradingCalendar(params, startDate, endDate);
@@ -60,7 +71,7 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 3. Инициализация инфляции
+    // 4. Инициализация инфляции (БЕЗ фильтрации по источнику)
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = initializeInflationAdjuster(params, startDate, endDate);
@@ -69,26 +80,28 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 4. Загрузка данных
+    // 5. Загрузка данных с фильтрацией по источнику
     // ════════════════════════════════════════════════════════════════════════
 
     TradingContext context;
     context.cashBalance = initialCapital;
 
     if (auto result = loadPriceData(
-            params.instrumentIds, startDate, endDate, context.priceData);
+            params.instrumentIds, startDate, endDate, context.priceData, dataSource);
         !result) {
         return std::unexpected(result.error());
     }
 
     if (auto result = loadDividendData(
-            params.instrumentIds, startDate, endDate, context.dividendData);
+            params.instrumentIds, startDate, endDate, context.dividendData, dataSource);
         !result) {
         return std::unexpected(result.error());
     }
 
+
+
     // ════════════════════════════════════════════════════════════════════════
-    // 5. Инициализация стратегии
+    // 6. Инициализация стратегии
     // ════════════════════════════════════════════════════════════════════════
 
     if (auto result = initializeStrategy(context, params); !result) {
@@ -96,7 +109,7 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 6. Главный цикл торговли
+    // 7. Главный цикл торговли
     // ════════════════════════════════════════════════════════════════════════
 
     std::vector<double> dailyValues;
@@ -151,7 +164,7 @@ BasePortfolioStrategy::backtest(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // 7. Расчет результатов
+    // 8. Расчет результатов
     // ════════════════════════════════════════════════════════════════════════
 
     BacktestResult result = calculateFinalResults(
@@ -159,7 +172,7 @@ BasePortfolioStrategy::backtest(
         dividendPaymentsCount, startDate, endDate, params);
 
     // ════════════════════════════════════════════════════════════════════════
-    // 8. Вывод статистики
+    // 9. Вывод статистики
     // ════════════════════════════════════════════════════════════════════════
 
     printFinalSummary(result);
@@ -682,26 +695,95 @@ int BasePortfolioStrategy::getYear(const TimePoint& date) const
     return tm.tm_year + 1900;
 }
 
+
+std::expected<std::string, std::string> BasePortfolioStrategy::determineDataSource(
+    const PortfolioParams& params) const
+{
+    // 1. Проверяем параметр "source" в словаре параметров
+    std::string sourceParam = params.getParameter("source");
+    if (!sourceParam.empty()) {
+        std::cout << "Using data source from parameters: " << sourceParam << std::endl;
+        return sourceParam;
+    }
+    return "";
+/*
+    // 2. Если источник не указан, получаем список всех доступных источников
+    auto sourcesResult = database_->listSources();
+    if (!sourcesResult) {
+        return std::unexpected("Failed to get available data sources: " +
+                               sourcesResult.error());
+    }
+
+    const auto& sources = *sourcesResult;
+
+    if (sources.empty()) {
+        return std::unexpected(
+            "No data sources available in database. "
+            "Please load data using 'portfolio load' command first.");
+    }
+
+    // 3. Используем первый доступный источник
+    std::string firstSource = sources[0];
+
+    std::cout << "No data source specified. Available sources: ";
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+        std::cout << sources[i];
+        if (i < sources.size() - 1) {
+            std::cout << ", ";
+        }
+    }
+    std::cout << std::endl;
+    std::cout << "Using first available source: " << firstSource << std::endl;
+
+    if (sources.size() > 1) {
+        std::cout << "  ℹ️  To use a specific source, set the 'source' parameter:" << std::endl;
+        std::cout << "     --param source:<source_name>" << std::endl;
+    }
+
+    return firstSource;*/
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// МОДИФИЦИРОВАНО: Загрузка данных цен с фильтрацией по источнику
+// ═══════════════════════════════════════════════════════════════════════════════
+
 std::expected<void, std::string> BasePortfolioStrategy::loadPriceData(
     const std::vector<std::string>& instrumentIds,
     const TimePoint& startDate,
     const TimePoint& endDate,
-    std::map<std::string, std::map<TimePoint, double>>& priceData)
+    std::map<std::string, std::map<TimePoint, double>>& priceData,
+    std::string_view dataSource)
 {
+    if (!dataSource.empty()) {
+        std::cout << "Loading price data from source: " << dataSource << std::endl;
+    }
+
     for (const auto& instrumentId : instrumentIds) {
+        // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: передаем dataSource в getAttributeHistory
         auto priceHistory = database_->getAttributeHistory(
-            instrumentId, "close", startDate, endDate);
+            instrumentId, "close", startDate, endDate, dataSource);
 
         if (!priceHistory) {
             return std::unexpected(
                 "Failed to load price data for " + instrumentId +
+                (dataSource.empty() ? "" : " from source '" + std::string(dataSource) + "'") +
                 ": " + priceHistory.error());
         }
 
         const auto& history = *priceHistory;
 
-        std::cout << "  Prices for " << instrumentId << ": "
-                  << history.size() << " data points" << std::endl;
+        if (history.empty()) {
+            return std::unexpected(
+                "No price data found for " + instrumentId +
+                (dataSource.empty() ? "" : " from source '" + std::string(dataSource) + "'") +
+                " in the specified date range");
+        }
+
+        std::cout << "  Prices for " << instrumentId;
+        if (!dataSource.empty()) {
+            std::cout << " [" << dataSource << "]";
+        }
+        std::cout << ": " << history.size() << " data points" << std::endl;
 
         for (const auto& [timestamp, value] : history) {
             if (std::holds_alternative<double>(value)) {
@@ -714,57 +796,56 @@ std::expected<void, std::string> BasePortfolioStrategy::loadPriceData(
     return {};
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// МОДИФИЦИРОВАНО: Загрузка дивидендов с фильтрацией по источнику
+// ═══════════════════════════════════════════════════════════════════════════════
+
 std::expected<void, std::string> BasePortfolioStrategy::loadDividendData(
     const std::vector<std::string>& instrumentIds,
     const TimePoint& startDate,
     const TimePoint& endDate,
-    std::map<std::string, std::vector<DividendPayment>>& dividendData)
+    std::map<std::string, std::vector<DividendPayment>>& dividendData,
+    std::string_view dataSource)
 {
+    if (!dataSource.empty()) {
+        std::cout << "Loading dividend data from source: " << dataSource << std::endl;
+    }
+
     for (const auto& instrumentId : instrumentIds) {
+        // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: передаем dataSource в getAttributeHistory
         auto divResult = database_->getAttributeHistory(
-            instrumentId, "dividend", startDate, endDate);
+            instrumentId, "dividend", startDate, endDate, dataSource);
 
         if (!divResult) {
+            // Дивиденды опциональны, продолжаем без ошибки
             continue;
         }
 
-        const auto& history = *divResult;
+        const auto& divHistory = *divResult;
 
-        for (const auto& [timestamp, value] : history) {
-            if (std::holds_alternative<double>(value)) {
-                DividendPayment payment;
-                payment.date = normalizeToDate(timestamp);
-                payment.amount = std::get<double>(value);
-                dividendData[instrumentId].push_back(payment);
+        if (!divHistory.empty()) {
+            std::cout << "  Dividends for " << instrumentId;
+            if (!dataSource.empty()) {
+                std::cout << " [" << dataSource << "]";
             }
-        }
+            std::cout << ": " << divHistory.size() << " payments" << std::endl;
 
-        if (!dividendData[instrumentId].empty()) {
-            std::cout << "  Dividends for " << instrumentId << ": "
-                      << dividendData[instrumentId].size() << " payments" << std::endl;
+            for (const auto& [timestamp, value] : divHistory) {
+                if (std::holds_alternative<double>(value)) {
+                    double amount = std::get<double>(value);
+                    if (amount > 0.0) {
+                        TimePoint normalizedDate = normalizeToDate(timestamp);
+                        dividendData[instrumentId].push_back({normalizedDate, amount});
+                    }
+                }
+            }
         }
     }
 
     return {};
 }
 
-std::map<std::string, std::string> BasePortfolioStrategy::getDefaultParameters() const
-{
-    std::map<std::string, std::string> defaults;
 
-    defaults["calendar"] = "IMOEX";
-    defaults["inflation"] = "INF";
-    defaults["tax"] = "false";
-    defaults["ndfl_rate"] = "0.13";
-    defaults["long_term_exemption"] = "true";
-    defaults["lot_method"] = "FIFO";
-    defaults["import_losses"] = "0";
-    defaults["risk_free_rate"] = "7.0";
-    defaults["risk_free_instrument"] = "";
-    defaults["rebalance_period"] = "0";
-
-    return defaults;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ПРИВАТНЫЕ МЕТОДЫ

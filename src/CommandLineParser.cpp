@@ -361,7 +361,7 @@ po::options_description CommandLineParser::createPortfolioOptions() {
     // НОВОЕ: Динамическая загрузка опций database плагинов
     // ═════════════════════════════════════════════════════════════════════════
 
-    if (databasePluginManager_) {
+ /*   if (databasePluginManager_) {
         try {
             auto allMetadata = databasePluginManager_->getAllPluginMetadata();
             for (const auto& metadata : allMetadata) {
@@ -372,7 +372,7 @@ po::options_description CommandLineParser::createPortfolioOptions() {
         } catch (const std::exception& e) {
             // Не критично - продолжаем без опций плагинов
         }
-    }
+    }*/
 
     return desc;
 }

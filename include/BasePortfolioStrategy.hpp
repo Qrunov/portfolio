@@ -62,6 +62,47 @@ struct TradingDayInfo {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Режимы пополнения счета
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum class RechargeMode {
+    Disabled,              // Пополнение отключено
+    Periodic,              // Периодическое пополнение (recharge + recharge_period)
+    InstrumentBased        // Пополнение на основе инструмента (rechargeI)
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Информация о пополнении счета
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct RechargeInfo {
+    RechargeMode mode = RechargeMode::Disabled;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Общие поля для всех режимов
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::size_t rechargesExecuted = 0;
+    double totalRecharged = 0.0;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Поля для периодического режима (Periodic)
+    // ════════════════════════════════════════════════════════════════════════
+
+    double periodicAmount = 0.0;
+    std::size_t periodicPeriod = 0;
+    TimePoint periodicStartDate;
+    TimePoint nextRechargeDate;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Поля для инструментного режима (InstrumentBased)
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::string instrumentId;
+    std::map<TimePoint, double> instrumentRecharges;  // Дата -> Сумма
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Base Portfolio Strategy
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -70,46 +111,31 @@ public:
     BasePortfolioStrategy() = default;
     ~BasePortfolioStrategy() override = default;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Dependencies
-    // ════════════════════════════════════════════════════════════════════════
-
     void setDatabase(std::shared_ptr<IPortfolioDatabase> db) override;
     void setTaxCalculator(std::shared_ptr<TaxCalculator> taxCalc) override;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Default Parameters
-    // ════════════════════════════════════════════════════════════════════════
-
-    std::map<std::string, std::string> getDefaultParameters() const override {
-        return {
-            {"calendar", "IMOEX"},
-            {"inflation", "INF"},
-            {"tax", "false"},
-            {"ndfl_rate", "0.13"},
-            {"long_term_exemption", "true"},
-            {"lot_method", "FIFO"},
-            {"import_losses", "0"},
-            {"risk_free_rate", "7.0"},
-            {"risk_free_instrument", ""},
-            {"rebalance_period", "0"},
-            {"source", ""}  // НОВОЕ: пустое значение = автоопределение
-        };
-    }
+    BasePortfolioStrategy(const BasePortfolioStrategy&) = delete;
+    BasePortfolioStrategy& operator=(const BasePortfolioStrategy&) = delete;
 
     // ════════════════════════════════════════════════════════════════════════
-    // Template Method
+    // Default parameters (полный список)
     // ════════════════════════════════════════════════════════════════════════
 
-    std::expected<BacktestResult, std::string> backtest(
+    virtual std::map<std::string, std::string> getDefaultParameters() const;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ШАБЛОННЫЙ МЕТОД BACKTEST
+    // ════════════════════════════════════════════════════════════════════════
+
+    virtual std::expected<BacktestResult, std::string> backtest(
         const PortfolioParams& params,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        double initialCapital) override final;
+        double initialCapital) override;
 
 protected:
     // ════════════════════════════════════════════════════════════════════════
-    // Хуки для переопределения в подклассах
+    // Виртуальные методы для наследников
     // ════════════════════════════════════════════════════════════════════════
 
     virtual std::expected<void, std::string> initializeStrategy(
@@ -118,6 +144,17 @@ protected:
         return {};
     }
 
+    virtual std::expected<void, std::string> validateInputParameters(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
+
+    virtual void printBacktestHeader(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        double initialCapital) const;
 
     virtual std::expected<void, std::string> processTradingDay(
         TradingContext& context,
@@ -158,6 +195,40 @@ protected:
         const PortfolioParams& params) = 0;
 
     // ════════════════════════════════════════════════════════════════════════
+    // Методы для пополнения счета
+    // ════════════════════════════════════════════════════════════════════════
+
+    std::expected<RechargeInfo, std::string> parseRechargeParameters(
+        const PortfolioParams& params,
+        const TimePoint& startDate,
+        const TimePoint& endDate) const;
+
+    std::expected<void, std::string> loadInstrumentRecharges(
+        const std::string& instrumentId,
+        const TimePoint& startDate,
+        const TimePoint& endDate,
+        std::map<TimePoint, double>& recharges) const;
+
+    std::expected<void, std::string> processRecharge(
+        TradingContext& context,
+        const TradingDayInfo& dayInfo,
+        RechargeInfo& rechargeInfo);
+
+    bool isRechargeDay(
+        const TimePoint& currentDate,
+        const RechargeInfo& rechargeInfo) const noexcept;
+
+    double getRechargeAmount(
+        const TimePoint& currentDate,
+        const RechargeInfo& rechargeInfo) const noexcept;
+
+    TimePoint calculateNextRechargeDate(
+        const TimePoint& startDate,
+        std::size_t period) const;
+
+    void printRechargeInfo(const RechargeInfo& rechargeInfo) const;
+
+    // ════════════════════════════════════════════════════════════════════════
     // Базовые невиртуальные методы
     // ════════════════════════════════════════════════════════════════════════
 
@@ -189,26 +260,17 @@ protected:
         const TimePoint& currentDate,
         const TradingContext& context) const;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Работа с источниками данных
-    // ════════════════════════════════════════════════════════════════════════
-
-    std::expected<std::string, std::string> determineDataSource(
-        const PortfolioParams& params) const;
-
     std::expected<void, std::string> loadPriceData(
         const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        std::map<std::string, std::map<TimePoint, double>>& priceData,
-        std::string_view dataSource = "");
+        std::map<std::string, std::map<TimePoint, double>>& priceData);
 
     std::expected<void, std::string> loadDividendData(
         const std::vector<std::string>& instrumentIds,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        std::map<std::string, std::vector<DividendPayment>>& dividendData,
-        std::string_view dataSource = "");
+        std::map<std::string, std::vector<DividendPayment>>& dividendData);
 
     InstrumentPriceInfo getInstrumentPriceInfo(
         const std::string& instrumentId,
@@ -250,17 +312,7 @@ protected:
         const TimePoint& currentDate,
         const TimePoint& nextDate) const;
 
-    std::expected<void, std::string> validateInputParameters(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) const;
-
-    void printBacktestHeader(
-        const PortfolioParams& params,
-        const TimePoint& startDate,
-        const TimePoint& endDate,
-        double initialCapital) const;
+    TimePoint parseDateString(std::string_view dateStr) const;
 
 protected:
     std::shared_ptr<IPortfolioDatabase> database_;

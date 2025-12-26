@@ -66,6 +66,7 @@ portfolio_add_test(
     LIBRARIES inmemory_db_impl
 )
 
+message(STATUS "  ✓ Added test: inflation_adjuster")
 
 portfolio_add_test(
     NAME risk_free_rate_calculator
@@ -73,7 +74,7 @@ portfolio_add_test(
     LIBRARIES inmemory_db_impl
 )
 
-message(STATUS "  ✓ Added test: inflation_adjuster")
+message(STATUS "  ✓ Added test: risk_free_rate_calculator")
 
 portfolio_add_test(
     NAME test_instrument_delete_filters
@@ -82,4 +83,13 @@ portfolio_add_test(
 )
 
 message(STATUS "  ✓ Added test: test_instrument_delete_filters")
+
+
+portfolio_add_test(
+    NAME recharge_functionality
+    SOURCES test_recharge_functionality.cpp
+    LIBRARIES inmemory_db_impl
+)
+
+message(STATUS "  ✓ Added test: test_recharge_functionality")
 

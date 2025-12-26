@@ -1,13 +1,13 @@
 Справка<br>
 portfolio help<br>
 Справка по командам<br>
-portfolio <command> help<br>
+portfolio \<command\> help<br>
 Справка по командам c опциями выбранных плагинов<br>
-portfolio <command> help --with csv --with sqlite_db<br><br><br><br><br><br><br>
+portfolio \<command\> help --with csv --with sqlite_db<br><br><br><br><br><br><br>
 
 
 
-Основной сценарий работы<br>
+<b>Основной сценарий работы</b><br>
 Посмотреть список плагинов<br>
 portfolio plugin list<br>
 Создать портфель<br>

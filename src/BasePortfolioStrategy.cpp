@@ -657,7 +657,6 @@ void BasePortfolioStrategy::printRechargeInfo(const RechargeInfo& rechargeInfo) 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ОБРАБОТКА ТОРГОВОГО ДНЯ
 // ═══════════════════════════════════════════════════════════════════════════════
-
 std::expected<void, std::string> BasePortfolioStrategy::processTradingDay(
     TradingContext& context,
     const PortfolioParams& params,
@@ -666,26 +665,77 @@ std::expected<void, std::string> BasePortfolioStrategy::processTradingDay(
     double& totalDividendsReceived,
     std::size_t& dividendPaymentsCount)
 {
+    // ════════════════════════════════════════════════════════════════════════
+    // Snapshot (если день ребалансировки)
+    // ════════════════════════════════════════════════════════════════════════
 
     if (context.isRebalanceDay) {
         printRebalanceSnapshot(context, params);
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // ✅ ДОБАВИТЬ: Продажи (ребалансировка, делистинг, конец бэктеста)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (auto result = processSales(context, params); !result) {
+        return std::unexpected(result.error());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     // Собираем дивиденды
+    // ════════════════════════════════════════════════════════════════════════
+
     if (auto result = collectCash(
             context, params, dayInfo, totalDividendsReceived, dividendPaymentsCount);
         !result) {
         return std::unexpected(result.error());
     }
 
-    // Инвестируем капитал
+    // ════════════════════════════════════════════════════════════════════════
+    // Инвестируем капитал (покупки)
+    // ════════════════════════════════════════════════════════════════════════
+
     if (auto result = deployCapital(context, params); !result) {
         return std::unexpected(result.error());
     }
 
+    // ════════════════════════════════════════════════════════════════════════
     // Сохраняем стоимость портфеля
+    // ════════════════════════════════════════════════════════════════════════
+
     double portfolioValue = calculatePortfolioValue(context);
     dailyValues.push_back(portfolioValue);
+
+    return {};
+}
+
+// ══════════════════════════════
+
+
+
+std::expected<void, std::string> BasePortfolioStrategy::processSales(
+    TradingContext& context,
+    const PortfolioParams& params)
+{
+    // Проходим по всем инструментам и проверяем нужно ли продавать
+    for (const auto& instrumentId : params.instrumentIds) {
+        auto sellResult = sell(instrumentId, context, params);
+
+        if (sellResult && sellResult->sharesTraded > 0) {
+            // Применяем продажу
+            context.holdings[instrumentId] -= sellResult->sharesTraded;
+            context.cashBalance += sellResult->totalAmount;
+
+            // Вывод транзакции
+            auto time = std::chrono::system_clock::to_time_t(context.currentDate);
+            std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d");
+            std::cout << "  📤 SELL: " << instrumentId << " "
+                      << static_cast<std::size_t>(sellResult->sharesTraded)
+                      << " shares @ ₽" << std::fixed << std::setprecision(2)
+                      << sellResult->price << " = ₽" << sellResult->totalAmount
+                      << " (" << sellResult->reason << ")" << std::endl;
+        }
+    }
 
     return {};
 }

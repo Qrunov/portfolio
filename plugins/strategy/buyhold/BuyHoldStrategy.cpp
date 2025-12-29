@@ -25,26 +25,26 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
 {
     TradeResult result;
 
-    // ════════════════════════════════════════════════════════════════════════
     // Проверяем наличие позиции
-    // ════════════════════════════════════════════════════════════════════════
-
     if (!context.holdings.count(instrumentId) ||
         context.holdings[instrumentId] <= 0.0001) {
+
+        // ✅ НОВОЕ: Отладочный вывод
+        if (context.isRebalanceDay) {
+            std::cout << "  ⏭️  SKIP SELL: " << instrumentId
+                      << " - no holdings" << std::endl;
+        }
+
         return result;
     }
 
     double currentShares = context.holdings[instrumentId];
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Получаем цену (сначала текущую, потом последнюю доступную)
-    // ════════════════════════════════════════════════════════════════════════
-
+    // Получаем цену
     double price = 0.0;
     bool useLastKnownPrice = false;
 
     auto priceResult = getPrice(instrumentId, context.currentDate, context);
-
     if (priceResult) {
         price = *priceResult;
     } else {
@@ -52,7 +52,11 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
             instrumentId, context.currentDate, context);
 
         if (!lastPriceResult) {
-            // Вообще нет данных о ценах
+            // ✅ НОВОЕ: Отладочный вывод
+            if (context.isRebalanceDay) {
+                std::cout << "  ⏭️  SKIP SELL: " << instrumentId
+                          << " - no price available" << std::endl;
+            }
             return result;
         }
 
@@ -60,64 +64,32 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
         useLastKnownPrice = true;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
     // Определяем причину и количество продажи
-    // ════════════════════════════════════════════════════════════════════════
-
     std::size_t sharesToSell = 0;
     std::string reason;
-
-    // ────────────────────────────────────────────────────────────────────────
-    // Случай 1: Конец бэктеста - продаем всё
-    // ────────────────────────────────────────────────────────────────────────
 
     if (context.isLastDay) {
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
         reason = "end of backtest";
     }
-
-    // ────────────────────────────────────────────────────────────────────────
-    // Случай 2: Делистинг - продаем всё
-    // ────────────────────────────────────────────────────────────────────────
-
     else if (isDelisted(instrumentId, context.currentDate, context)) {
         sharesToSell = static_cast<std::size_t>(std::floor(currentShares));
         reason = "delisting";
-
-        auto priceInfo = getInstrumentPriceInfo(instrumentId, context);
-        auto lastDate = std::chrono::system_clock::to_time_t(priceInfo.lastAvailableDate);
-        auto currentDate = std::chrono::system_clock::to_time_t(context.currentDate);
-
-        std::cout << "   ℹ️  " << instrumentId << " delisted: "
-                  << "last price date " << std::put_time(std::localtime(&lastDate), "%Y-%m-%d")
-                  << ", current date " << std::put_time(std::localtime(&currentDate), "%Y-%m-%d")
-                  << std::endl;
     }
-
-    // ────────────────────────────────────────────────────────────────────────
-    // ✅ Случай 3: Ребалансировка - продаем излишек (с проверкой порога!)
-    // ────────────────────────────────────────────────────────────────────────
-
     else if (context.isRebalanceDay) {
-        // Определяем целевой вес
-        double targetWeight = 1.0 / params.instrumentIds.size();
+        // Рассчитываем излишек
+        double targetWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
         if (params.weights.count(instrumentId)) {
             targetWeight = params.weights.at(instrumentId);
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        // Рассчитываем общую стоимость портфеля
-        // ════════════════════════════════════════════════════════════════════
-
         double totalPortfolioValue = context.cashBalance;
-
         for (const auto& [instId, shares] : context.holdings) {
             if (shares > 0.0 && context.priceData.count(instId)) {
                 auto instPriceResult = getPrice(instId, context.currentDate, context);
                 if (instPriceResult) {
                     totalPortfolioValue += shares * (*instPriceResult);
                 } else {
-                    // Используем последнюю известную цену
                     auto lastPrice = getLastAvailablePrice(instId, context.currentDate, context);
                     if (lastPrice) {
                         totalPortfolioValue += shares * (*lastPrice);
@@ -126,35 +98,32 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
             }
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        // Рассчитываем излишек
-        // ════════════════════════════════════════════════════════════════════
-
         double currentValue = currentShares * price;
         double targetValue = totalPortfolioValue * targetWeight;
         double excess = currentValue - targetValue;
 
-        // ════════════════════════════════════════════════════════════════════
-        // ✅ НОВОЕ: Проверяем порог для излишка
-        // ════════════════════════════════════════════════════════════════════
-
+        // Проверяем порог
         double thresholdPercent = std::stod(
             params.getParameter("min_rebalance_threshold", "1.00"));
         double minExcessThreshold = totalPortfolioValue * (thresholdPercent / 100.0);
 
-        // Продаем только если излишек больше порога
+        // ✅ НОВОЕ: Отладочный вывод ПЕРЕД проверкой
+        std::cout << "  🔍 SELL CHECK: " << instrumentId
+                  << " excess=₽" << std::fixed << std::setprecision(2) << excess
+                  << " threshold=₽" << minExcessThreshold;
+
         if (excess > minExcessThreshold) {
             double excessShares = excess / price;
             sharesToSell = static_cast<std::size_t>(std::floor(excessShares));
             reason = "rebalance";
+
+            std::cout << " → WILL SELL " << sharesToSell << " shares" << std::endl;
+        } else {
+            std::cout << " → SKIP (below threshold)" << std::endl;
         }
-        // Если excess <= minExcessThreshold - НЕ продаем (мелкий излишек)
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // Если нечего продавать - выходим
-    // ════════════════════════════════════════════════════════════════════════
-
+    // Если нечего продавать
     if (sharesToSell == 0) {
         return result;
     }
@@ -259,7 +228,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
 
     double price = *priceResult;
 
-    double targetWeight = 1.0 / params.instrumentIds.size();
+    double targetWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
     if (params.weights.count(instrumentId)) {
         targetWeight = params.weights.at(instrumentId);
     }
@@ -293,16 +262,24 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     double minDeficitThreshold = totalPortfolioValue * (thresholdPercent / 100.0);
 
     // ════════════════════════════════════════════════════════════════════════
-    // РЕЖИМ РЕИНВЕСТИРОВАНИЯ (обычные дни с дивидендами)
+    // ✅ ОТЛАДОЧНЫЙ ВЫВОД - ПОСЛЕ расчета всех переменных!
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (context.isRebalanceDay || context.dayIndex == 0) {
+        std::cout << "  🔍 BUY CHECK: " << instrumentId
+                  << " deficit=₽" << std::fixed << std::setprecision(2) << deficit
+                  << " threshold=₽" << minDeficitThreshold;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // РЕЖИМ РЕИНВЕСТИРОВАНИЯ
     // ════════════════════════════════════════════════════════════════════════
 
     if (context.isReinvestment) {
-        // Игнорируем мелкий дефицит
         if (deficit < minDeficitThreshold) {
             return result;
         }
 
-        // allocation = дефицит, но не больше доступного кэша
         double allocation = std::min(deficit, context.cashBalance * targetWeight);
 
         if (allocation < price) {
@@ -344,19 +321,27 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // ✅ ДЕНЬ 0 и РЕБАЛАНСИРОВКА - покупаем СРАЗУ нужное количество
+    // ДЕНЬ 0 и РЕБАЛАНСИРОВКА
     // ════════════════════════════════════════════════════════════════════════
 
-    // Игнорируем мелкий дефицит
     if (deficit < minDeficitThreshold) {
+        // ✅ ОТЛАДОЧНЫЙ ВЫВОД при SKIP
+        if (context.isRebalanceDay || context.dayIndex == 0) {
+            std::cout << " → SKIP (below threshold)" << std::endl;
+        }
         return result;
+    }
+
+    // ✅ ОТЛАДОЧНЫЙ ВЫВОД при WILL BUY
+    if (context.isRebalanceDay || context.dayIndex == 0) {
+        std::cout << " → WILL BUY" << std::endl;
     }
 
     // Рассчитываем общий дефицит по всем инструментам
     double totalDeficit = 0.0;
 
     for (const auto& instId : params.instrumentIds) {
-        double instWeight = 1.0 / params.instrumentIds.size();
+        double instWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
         if (params.weights.count(instId)) {
             instWeight = params.weights.at(instId);
         }
@@ -377,14 +362,11 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
         }
     }
 
-    // ✅ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Распределяем кэш, покупаем ВСЁ сразу
     double allocation = 0.0;
 
     if (totalDeficit > 0) {
-        // Пропорционально дефициту от общего дефицита
         allocation = context.cashBalance * (deficit / totalDeficit);
     } else {
-        // Если нет дефицитов - по весам
         allocation = context.cashBalance * targetWeight;
     }
 
@@ -392,7 +374,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
         return result;
     }
 
-    // ✅ Покупаем СТОЛЬКО акций, СКОЛЬКО позволяет allocation
     std::size_t shares = static_cast<std::size_t>(std::floor(allocation / price));
 
     if (shares == 0) {
@@ -401,7 +382,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
 
     double totalAmount = shares * price;
 
-    // Проверка что не превышаем кэш
     if (totalAmount > context.cashBalance) {
         shares = static_cast<std::size_t>(std::floor(context.cashBalance / price));
         totalAmount = shares * price;

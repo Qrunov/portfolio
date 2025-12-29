@@ -326,6 +326,12 @@ protected:
     std::unique_ptr<TradingCalendar> calendar_;
     std::unique_ptr<InflationAdjuster> inflationAdjuster_;
     double totalTaxesPaidDuringBacktest_ = 0.0;
+
+    virtual std::expected<void, std::string> processSales(
+        TradingContext& context,
+        const PortfolioParams& params);
+
+
 };
 
 } // namespace portfolio

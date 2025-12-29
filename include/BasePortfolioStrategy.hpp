@@ -138,6 +138,11 @@ protected:
     // Виртуальные методы для наследников
     // ════════════════════════════════════════════════════════════════════════
 
+    void printRebalanceSnapshot(
+        const TradingContext& context,
+        const PortfolioParams& params) const;
+
+
     virtual std::expected<void, std::string> initializeStrategy(
         TradingContext& /* context */,
         const PortfolioParams& /* params */) {
@@ -182,7 +187,8 @@ protected:
         std::size_t dividendPaymentsCount,
         const TimePoint& startDate,
         const TimePoint& endDate,
-        const PortfolioParams& params) const;
+        const PortfolioParams& params,
+        double totalRecharged = 0.0) const;  // ✅ НОВЫЙ параметр!
 
     virtual std::expected<TradeResult, std::string> sell(
         const std::string& instrumentId,

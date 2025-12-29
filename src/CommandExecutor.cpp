@@ -124,10 +124,17 @@ void CommandExecutor::printBacktestResult(
     std::cout << "BACKTEST RESULTS" << std::endl;
     std::cout << std::string(70, '=') << std::endl << std::endl;
 
-    // Основные метрики
+    // ════════════════════════════════════════════════════════════════════════
+    // Секция 1: Performance Metrics
+    // ════════════════════════════════════════════════════════════════════════
+
     std::cout << "Performance Metrics:" << std::endl;
-    std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
-    std::cout << "  Final Value:         " << std::fixed << std::setprecision(2)
+
+    if (result.tradingDays > 0) {
+        std::cout << "  Trading Days:        " << result.tradingDays << std::endl;
+    }
+
+    std::cout << "  Final Value:         ₽" << std::fixed << std::setprecision(2)
               << result.finalValue << std::endl;
     std::cout << "  Total Return:        " << std::setprecision(2)
               << result.totalReturn << "%" << std::endl;
@@ -135,7 +142,27 @@ void CommandExecutor::printBacktestResult(
               << result.annualizedReturn << "%" << std::endl;
     std::cout << std::endl;
 
-    // Risk метрики
+    // ════════════════════════════════════════════════════════════════════════
+    // Секция 2: Inflation-Adjusted Metrics (если есть инфляция)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.cumulativeInflation > 0.0) {
+        std::cout << "Inflation-Adjusted Metrics:" << std::endl;
+        std::cout << "  Cumulative Inflation:" << std::setprecision(2)
+                  << result.cumulativeInflation << "%" << std::endl;
+        std::cout << "  Real Final Value:    ₽" << std::setprecision(2)
+                  << result.realFinalValue << std::endl;
+        std::cout << "  Real Total Return:   " << std::setprecision(2)
+                  << result.totalReturn << "%" << std::endl;
+        std::cout << "  Real Annual Return:  " << std::setprecision(2)
+                  << result.realAnnualizedReturn << "%" << std::endl;
+        std::cout << std::endl;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Секция 3: Risk Metrics
+    // ════════════════════════════════════════════════════════════════════════
+
     std::cout << "Risk Metrics:" << std::endl;
     std::cout << "  Volatility:          " << std::setprecision(2)
               << result.volatility << "%" << std::endl;
@@ -145,21 +172,41 @@ void CommandExecutor::printBacktestResult(
               << result.sharpeRatio << std::endl;
     std::cout << std::endl;
 
-    if (result.totalDividends > 0) {
-        std::cout << "Dividend Income:" << std::endl;
-        std::cout << "  Total Dividends:     " << std::setprecision(2)
+    // ════════════════════════════════════════════════════════════════════════
+    // Секция 4: Dividend Metrics (если есть дивиденды)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.totalDividends > 0.0) {
+        std::cout << "Dividend Metrics:" << std::endl;
+        std::cout << "  Total Dividends:     ₽" << std::setprecision(2)
                   << result.totalDividends << std::endl;
         std::cout << "  Dividend Yield:      " << std::setprecision(2)
                   << result.dividendYield << "%" << std::endl;
+
+        if (result.dividendPayments > 0) {
+            std::cout << "  Payments Count:      " << result.dividendPayments << std::endl;
+        }
+
+        // Разделение доходности (если доступно)
+        if (result.priceReturn != 0.0 || result.dividendReturn != 0.0) {
+            std::cout << "  Price Return:        " << std::setprecision(2)
+            << result.priceReturn << "%" << std::endl;
+            std::cout << "  Dividend Return:     " << std::setprecision(2)
+                      << result.dividendReturn << "%" << std::endl;
+        }
+
         std::cout << std::endl;
     }
 
-    // Налоги
-    if (result.totalTaxesPaid > 0) {
+    // ════════════════════════════════════════════════════════════════════════
+    // Секция 5: Tax Information (если есть налоги)
+    // ════════════════════════════════════════════════════════════════════════
+
+    if (result.totalTaxesPaid > 0.0) {
         std::cout << "Tax Information:" << std::endl;
         std::cout << "  Total Taxes Paid:    ₽" << std::setprecision(2)
                   << result.totalTaxesPaid << std::endl;
-        std::cout << "  After-Tax Value:     " << std::setprecision(2)
+        std::cout << "  After-Tax Value:     ₽" << std::setprecision(2)
                   << result.afterTaxFinalValue << std::endl;
         std::cout << "  After-Tax Return:    " << std::setprecision(2)
                   << result.afterTaxReturn << "%" << std::endl;
@@ -169,43 +216,41 @@ void CommandExecutor::printBacktestResult(
 
         // Детали налогов
         const auto& tax = result.taxSummary;
-        std::cout << "  Tax Details:" << std::endl;
 
-        std::cout << "    Taxable Gain:      ₽" << std::setprecision(2)
-                  << tax.taxableGain << std::endl;
-        std::cout << "    Tax Paid:          ₽" << std::setprecision(2)
-                  << tax.totalTax << std::endl;
+        if (tax.totalGains > 0.0 || tax.totalLosses > 0.0) {
+            std::cout << "  Tax Details:" << std::endl;
 
-        if (result.totalDividends > 0) {
-            // Дивидендный налог = дивиденды * ставка (примерно)
-            double estimatedDivTax = result.totalDividends * 0.13; // оценка
-            std::cout << "    Estimated Div Tax: ₽" << std::setprecision(2)
-                      << estimatedDivTax << std::endl;
+            if (tax.taxableGain > 0.0) {
+                std::cout << "    Taxable Gain:      ₽" << std::setprecision(2)
+                          << tax.taxableGain << std::endl;
+            }
+
+            if (tax.totalTax > 0.0) {
+                std::cout << "    Tax Paid:          ₽" << std::setprecision(2)
+                          << tax.totalTax << std::endl;
+            }
+
+            if (result.totalDividends > 0.0) {
+                // Приблизительный дивидендный налог
+                double estimatedDivTax = result.totalDividends * 0.13;  // NDFL 13%
+                std::cout << "    Dividend Tax (est):₽" << std::setprecision(2)
+                          << estimatedDivTax << std::endl;
+            }
+
+            if (tax.carryforwardLoss > 0.0) {
+                std::cout << "    Loss Carried Fwd:  ₽" << std::setprecision(2)
+                          << tax.carryforwardLoss << std::endl;
+            }
+
+            std::cout << std::endl;
         }
-
-        // Можно вывести информацию из других полей если нужно
-
-        if (tax.carryforwardLoss > 0) {
-            std::cout << "    Carryforward Loss: ₽" << std::setprecision(2)
-                      << tax.carryforwardLoss << std::endl;
-        }
-
-        std::cout << std::endl;
     }
 
-    // Инфляция
-    if (result.hasInflationData) {
-        std::cout << "Inflation Adjustment:" << std::endl;
-        std::cout << "  Cumulative Inflation: " << std::setprecision(2)
-                  << result.informationRatio << "%" << std::endl;
-        std::cout << "  Real Return:          " << std::setprecision(2)
-                  << result.realTotalReturn << "%" << std::endl;
-        std::cout << "  Real Annual Return:   " << std::setprecision(2)
-                  << result.realAnnualizedReturn << "%" << std::endl;
-        std::cout << std::endl;
-    }
+    // ════════════════════════════════════════════════════════════════════════
+    // Closing separator
+    // ════════════════════════════════════════════════════════════════════════
 
-    std::cout << std::string(70, '=') << std::endl << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

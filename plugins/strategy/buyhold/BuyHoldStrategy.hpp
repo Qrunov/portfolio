@@ -29,12 +29,7 @@ public:
         return "2.0.0";
     }
 
-    std::map<std::string, std::string> getDefaultParameters() const override {
-        auto defaults = BasePortfolioStrategy::getDefaultParameters();
-        // BuyHold не требует ребалансировки
-        defaults["rebalance_period"] = "0";
-        return defaults;
-    }
+    std::map<std::string, std::string> getDefaultParameters() const override;
 
 protected:
     // ════════════════════════════════════════════════════════════════════════

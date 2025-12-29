@@ -83,6 +83,9 @@ public:
         double trackingError = 0.0;
         double informationRatio = 0.0;
 
+        // ✅ НОВОЕ: Информация о пополнениях
+        double totalRecharged = 0.0;
+        double totalInvested = 0.0;  // initial + recharged
     };
 
     struct PortfolioParams {

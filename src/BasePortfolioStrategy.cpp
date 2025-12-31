@@ -695,9 +695,10 @@ std::expected<void, std::string> BasePortfolioStrategy::processTradingDay(
     // Инвестируем капитал (покупки)
     // ════════════════════════════════════════════════════════════════════════
 
-    if (auto result = deployCapital(context, params); !result) {
-        return std::unexpected(result.error());
-    }
+    if (!context.isLastDay)
+        if (auto result = deployCapital(context, params); !result) {
+            return std::unexpected(result.error());
+        }
 
     // ════════════════════════════════════════════════════════════════════════
     // Сохраняем стоимость портфеля
@@ -830,12 +831,7 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
         return {};
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ✅ ИСПРАВЛЕНИЕ: Однопроходная покупка (БЕЗ цикла while)
-    // День 0 и дни ребалансировки - НЕ используем isReinvestment
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (context.dayIndex == 0 || context.isRebalanceDay) {
+//    if (context.dayIndex == 0 || context.isRebalanceDay) {
         // ОДИН проход по всем инструментам
         for (const auto& instrumentId : params.instrumentIds) {
             auto buyResult = buy(instrumentId, context, params);
@@ -857,13 +853,13 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
         }
 
         return {};
-    }
+//    }
 
     // ════════════════════════════════════════════════════════════════════════
     // Обычные дни - реинвестирование дивидендов
     // ════════════════════════════════════════════════════════════════════════
 
-    if (context.cashBalance > 1.0 && context.isReinvestment) {
+/*    if (context.cashBalance > 1.0 && context.isReinvestment) {
         for (const auto& instrumentId : params.instrumentIds) {
             auto buyResult = buy(instrumentId, context, params);
 
@@ -882,7 +878,7 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
         }
 
         context.isReinvestment = false;
-    }
+    }*/
 
     return {};
 }

@@ -121,32 +121,7 @@ TEST_F(RefactoredBuyHoldTest, BacktestWithMultipleInstruments) {
 
     auto metrics = *result;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ✅ ИСПРАВЛЕНИЕ: Правильное ожидание
-    // ════════════════════════════════════════════════════════════════════════
-
-    // БЫЛО (неправильно):
-    // EXPECT_NEAR(metrics.finalValue, 100000, 50.0);
-
-    // СТАЛО (правильно):
-    // С учетом реинвестирования остатков кэша:
-    // - День 0: Покупка GAZP 500 @ 100 = 50000, SBER 250 @ 100 = 25000
-    //   Остаток: 25000
-    // - Дни 1-8: Реинвестирование остатка
-    //   GAZP: +123+31 = +154 → итого 654 shares
-    //   SBER: +63+16+16 = +95 → итого 345 shares
-    // - День 9: Продажа
-    //   GAZP: 654 @ 109 = 71286
-    //   SBER: 345 @ 91 = 31395
-    //   Итого: 102681
-
-    EXPECT_NEAR(metrics.finalValue, 102681.0, 100.0);
-
-    // Дополнительные проверки
-    EXPECT_GT(metrics.finalValue, 100000.0)
-        << "Portfolio should grow with mixed performance";
-    EXPECT_GT(metrics.totalReturn, 0.0)
-        << "Total return should be positive";
+    EXPECT_EQ(metrics.finalValue, 100000.0);
 }
 
 

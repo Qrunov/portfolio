@@ -275,7 +275,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     // РЕЖИМ РЕИНВЕСТИРОВАНИЯ
     // ════════════════════════════════════════════════════════════════════════
 
-    if (context.isReinvestment) {
+/*    if (context.isReinvestment) {
         if (deficit < minDeficitThreshold) {
             return result;
         }
@@ -318,11 +318,8 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
         result.reason = "cash reinvestment";
 
         return result;
-    }
+    }*/
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ДЕНЬ 0 и РЕБАЛАНСИРОВКА
-    // ════════════════════════════════════════════════════════════════════════
 
     if (deficit < minDeficitThreshold) {
         // ✅ ОТЛАДОЧНЫЙ ВЫВОД при SKIP

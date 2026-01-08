@@ -167,6 +167,18 @@ public:
         return result;
     }
 
+    std::expected<std::map<std::string, TradeResult>, std::string> whatToBuy(
+        TradingContext& context,
+        const PortfolioParams& params) {}
+
+
+    std::expected<std::map<std::string, TradeResult>, std::string> whatToSell(
+        TradingContext& context,
+        const PortfolioParams& params) {}
+
+
+
+
     // Публичные обертки для тестирования protected методов
     std::expected<RechargeInfo, std::string> testParseRechargeParameters(
         const PortfolioParams& params,

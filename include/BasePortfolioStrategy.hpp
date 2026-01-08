@@ -142,6 +142,7 @@ protected:
         const TradingContext& context,
         const PortfolioParams& params) const;
 
+    double getTotalPortfolioValue(TradingContext& context);
 
     virtual std::expected<void, std::string> initializeStrategy(
         TradingContext& /* context */,
@@ -200,6 +201,14 @@ protected:
         TradingContext& context,
         const PortfolioParams& params) = 0;
 
+
+    virtual std::expected<std::map<std::string, TradeResult>, std::string> whatToSell(
+        TradingContext& context,
+        const PortfolioParams& params) = 0;
+
+    virtual std::expected<std::map<std::string, TradeResult>, std::string> whatToBuy(
+        TradingContext& context,
+        const PortfolioParams& params) = 0;
     // ════════════════════════════════════════════════════════════════════════
     // Методы для пополнения счета
     // ════════════════════════════════════════════════════════════════════════
@@ -320,6 +329,7 @@ protected:
 
     TimePoint parseDateString(std::string_view dateStr) const;
 
+
 protected:
     std::shared_ptr<IPortfolioDatabase> database_;
     std::shared_ptr<TaxCalculator> taxCalculator_;
@@ -330,7 +340,6 @@ protected:
     virtual std::expected<void, std::string> processSales(
         TradingContext& context,
         const PortfolioParams& params);
-
 
 };
 

@@ -9,6 +9,25 @@
 
 namespace portfolio {
 
+
+double BasePortfolioStrategy::getTotalPortfolioValue(TradingContext& context)
+{
+
+    double totalPortfolioValue = context.cashBalance;
+
+    std::map<std::string, double> instDeficit;
+    for (const auto& [instId, shares] : context.holdings) {
+        if (shares > 0 && context.priceData.count(instId)) {
+            auto instPriceIt = context.priceData[instId].find(context.currentDate);
+            if (instPriceIt != context.priceData[instId].end()) {
+                totalPortfolioValue += shares * instPriceIt->second;
+            }
+        }
+    }
+    return totalPortfolioValue;
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // УСТАНОВКА ЗАВИСИМОСТЕЙ
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -718,23 +737,62 @@ std::expected<void, std::string> BasePortfolioStrategy::processSales(
     TradingContext& context,
     const PortfolioParams& params)
 {
-    // Проходим по всем инструментам и проверяем нужно ли продавать
-    for (const auto& instrumentId : params.instrumentIds) {
-        auto sellResult = sell(instrumentId, context, params);
 
-        if (sellResult && sellResult->sharesTraded > 0) {
+    auto wtSales = whatToSell(context, params);
+    if (!wtSales)
+        return   std::unexpected(wtSales.error());
+
+
+    for (const auto& [instrumentId, sellResult]: *wtSales) {
+        if (sellResult.sharesTraded > 0) {
             // Применяем продажу
-            context.holdings[instrumentId] -= sellResult->sharesTraded;
-            context.cashBalance += sellResult->totalAmount;
+            context.holdings[instrumentId] -= sellResult.sharesTraded;
+            context.cashBalance += sellResult.totalAmount;
 
             // Вывод транзакции
             auto time = std::chrono::system_clock::to_time_t(context.currentDate);
             std::cout << std::put_time(std::localtime(&time), "%Y-%m-%d");
             std::cout << "  📤 SELL: " << instrumentId << " "
-                      << static_cast<std::size_t>(sellResult->sharesTraded)
+                      << static_cast<std::size_t>(sellResult.sharesTraded)
                       << " shares @ ₽" << std::fixed << std::setprecision(2)
-                      << sellResult->price << " = ₽" << sellResult->totalAmount
-                      << " (" << sellResult->reason << ")" << std::endl;
+                      << sellResult.price << " = ₽" << sellResult.totalAmount
+                      << " (" << sellResult.reason << ")" << std::endl;
+            // ════════════════════════════════════════════════════════════════════════
+            // Регистрируем продажу в налоговом калькуляторе
+            // ════════════════════════════════════════════════════════════════════════
+
+            if (taxCalculator_ && context.taxLots.count(instrumentId)) {
+                auto& lots = context.taxLots[instrumentId];
+
+                auto taxResult = taxCalculator_->recordSale(
+                    instrumentId,
+                    static_cast<double>(sellResult.sharesTraded),
+                    sellResult.price,
+                    context.currentDate,
+                    lots);
+
+                if (!taxResult) {
+                    std::cout << "   ⚠️  Tax recording failed: " << taxResult.error() << std::endl;
+                }
+
+                // Обновляем лоты после продажи
+                double remainingToSell = static_cast<double>(sellResult.sharesTraded);
+
+                for (auto& lot : lots) {
+                    if (remainingToSell <= 0.0001) break;
+                    if (lot.quantity <= 0.0001) continue;
+
+                    double soldFromLot = std::min(lot.quantity, remainingToSell);
+                    lot.quantity -= soldFromLot;
+                    remainingToSell -= soldFromLot;
+                }
+
+                // Удаляем пустые лоты
+                lots.erase(
+                    std::remove_if(lots.begin(), lots.end(),
+                                   [](const TaxLot& lot) { return lot.quantity < 0.0001; }),
+                    lots.end());
+            }
         }
     }
 
@@ -790,10 +848,6 @@ std::expected<void, std::string> BasePortfolioStrategy::collectCash(
             dividendTax = grossDividend - netDividend;
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Накапливаем ЧИСТЫЕ дивиденды
-        // ════════════════════════════════════════════════════════════════════
-
         context.cashBalance += netDividend;
         totalDividendsReceived += netDividend;  // ✅ ЧИСТАЯ СУММА (после налогов)
         ++dividendPaymentsCount;
@@ -801,7 +855,6 @@ std::expected<void, std::string> BasePortfolioStrategy::collectCash(
         // ════════════════════════════════════════════════════════════════════
         // Вывод с датой
         // ════════════════════════════════════════════════════════════════════
-
         std::cout << formatDate(context.currentDate) << "  "
                   << "💰 DIVIDEND: " << instrumentId << " - ₽"
                   << std::fixed << std::setprecision(2) << grossDividend
@@ -833,13 +886,25 @@ std::expected<void, std::string> BasePortfolioStrategy::deployCapital(
 
 //    if (context.dayIndex == 0 || context.isRebalanceDay) {
         // ОДИН проход по всем инструментам
-        for (const auto& instrumentId : params.instrumentIds) {
-            auto buyResult = buy(instrumentId, context, params);
-
-            if (buyResult && buyResult->sharesTraded > 0) {
+    auto res = whatToBuy(context, params);
+    if (res)
+    for (const auto& [instrumentId, buyResultRef] : *res) {
+            auto buyResult = &buyResultRef;
+            //auto buyResult = buy(instrumentId, context, params);
+             if (buyResult->sharesTraded > 0) {
                 // Применяем покупку
                 context.holdings[instrumentId] += buyResult->sharesTraded;
                 context.cashBalance -= buyResult->totalAmount;
+
+
+                if (taxCalculator_) {
+                    TaxLot lot;
+                    lot.purchaseDate = context.currentDate;
+                    lot.quantity = static_cast<double>(buyResult->sharesTraded);
+                    lot.costBasis = buyResult -> price;
+                    lot.instrumentId = instrumentId;
+                    context.taxLots[instrumentId].push_back(lot);
+                }
 
                 // Вывод
                 auto time = std::chrono::system_clock::to_time_t(context.currentDate);
@@ -1179,7 +1244,7 @@ bool BasePortfolioStrategy::isDelisted(
     }
 
     TimePoint normalizedDate = normalizeToDate(currentDate);
-    return normalizedDate > info.lastAvailableDate;
+    return normalizedDate >= info.lastAvailableDate;
 }
 
 InstrumentPriceInfo BasePortfolioStrategy::getInstrumentPriceInfo(

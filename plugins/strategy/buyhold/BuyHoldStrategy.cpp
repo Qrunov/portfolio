@@ -18,6 +18,67 @@ std::expected<void, std::string> BuyHoldStrategy::initializeStrategy(
     return {};
 }
 
+
+
+std::expected<std::map<std::string, TradeResult>, std::string> BuyHoldStrategy::whatToSell(
+    TradingContext& context,
+    const PortfolioParams& params)
+{
+    std::map<std::string, TradeResult> res;
+
+    double totalPortfolioValue = getTotalPortfolioValue(context);
+    std::string reason;
+
+    for (const auto& [instId, shares] : context.holdings) {
+        TradeResult result;
+        result.sharesTraded = 0;
+        auto priceResult = getPrice(instId, context.currentDate, context);
+        if (!priceResult) { //не можем продать сегодня, просто пропуск
+            continue;
+        }
+
+
+        if (context.isLastDay) {
+            result.sharesTraded = shares;
+            result.reason = "end of backtest";
+        }
+        else if (isDelisted(instId, context.currentDate, context)){
+            result.sharesTraded = shares;
+            result.reason = "end price history(may be delisted)";
+        }
+        else if (context.isRebalanceDay){
+            //TODO: заменить на функцию вычисления весов по умолчанию
+            double instWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
+            if (params.weights.count(instId)) {
+                instWeight = params.weights.at(instId);
+            }
+
+            double currentValue = shares * *priceResult;
+            double targetValue = totalPortfolioValue * instWeight;
+            double excess = currentValue - targetValue;
+            if (excess > 0)
+            {
+                double excessShares = excess / *priceResult;
+                uint sharesToSell = static_cast<std::size_t>(std::floor(excessShares));
+                if (sharesToSell)
+                {
+                    result.sharesTraded = sharesToSell;
+                    result.reason = "rebalance";
+                }
+            }
+        }
+
+        if (result.sharesTraded)
+        {
+            result.price = *priceResult;
+            result.totalAmount = result.price * result.sharesTraded;
+            res[instId] = result;
+        }
+    }
+
+    return res;
+}
+
 std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     const std::string& instrumentId,
     TradingContext& context,
@@ -29,7 +90,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     if (!context.holdings.count(instrumentId) ||
         context.holdings[instrumentId] <= 0.0001) {
 
-        // ✅ НОВОЕ: Отладочный вывод
+
         if (context.isRebalanceDay) {
             std::cout << "  ⏭️  SKIP SELL: " << instrumentId
                       << " - no holdings" << std::endl;
@@ -134,44 +195,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::sell(
     }
 
     double totalAmount = sharesToSell * price;
-
-    // ════════════════════════════════════════════════════════════════════════
-    // Регистрируем продажу в налоговом калькуляторе
-    // ════════════════════════════════════════════════════════════════════════
-
-    if (taxCalculator_ && context.taxLots.count(instrumentId)) {
-        auto& lots = context.taxLots[instrumentId];
-
-        auto taxResult = taxCalculator_->recordSale(
-            instrumentId,
-            static_cast<double>(sharesToSell),
-            price,
-            context.currentDate,
-            lots);
-
-        if (!taxResult) {
-            std::cout << "   ⚠️  Tax recording failed: " << taxResult.error() << std::endl;
-        }
-
-        // Обновляем лоты после продажи
-        double remainingToSell = static_cast<double>(sharesToSell);
-
-        for (auto& lot : lots) {
-            if (remainingToSell <= 0.0001) break;
-            if (lot.quantity <= 0.0001) continue;
-
-            double soldFromLot = std::min(lot.quantity, remainingToSell);
-            lot.quantity -= soldFromLot;
-            remainingToSell -= soldFromLot;
-        }
-
-        // Удаляем пустые лоты
-        lots.erase(
-            std::remove_if(lots.begin(), lots.end(),
-                           [](const TaxLot& lot) { return lot.quantity < 0.0001; }),
-            lots.end());
-    }
-
     // ════════════════════════════════════════════════════════════════════════
     // Формируем результат
     // ════════════════════════════════════════════════════════════════════════
@@ -204,6 +227,88 @@ std::map<std::string, std::string> BuyHoldStrategy::getDefaultParameters() const
 
     return defaults;
 }
+
+std::expected<std::map<std::string, TradeResult>, std::string> BuyHoldStrategy::whatToBuy(
+    TradingContext& context,
+    const PortfolioParams& params)
+{
+    std::map<std::string, TradeResult> res;
+    double totalPortfolioValue = getTotalPortfolioValue(context);
+    double totalDeficit = 0.0;
+
+    std::map<std::string, double> instDeficit;
+    for (const auto& instId : params.instrumentIds) {
+        if (isDelisted(instId,context.currentDate,context))
+            continue;
+        //TODO: вынести подсчет весов в отдельную функцию, учесть делистинг
+        double instWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
+        if (params.weights.count(instId)) {
+            instWeight = params.weights.at(instId);
+        }
+
+
+        double instCurrentValue = 0.0;
+        if (context.holdings.count(instId) && context.priceData.count(instId)) {
+            auto instPriceIt = context.priceData[instId].find(context.currentDate);
+            if (instPriceIt != context.priceData[instId].end()) {
+                instCurrentValue = context.holdings[instId] * instPriceIt->second;
+            }
+        }
+
+
+        double instTargetValue = totalPortfolioValue * instWeight;
+//        std::cout << "PLANNED reallocate: " << instId << " value " << instTargetValue << "totalPortfolioValue:" <<  totalPortfolioValue  << std::endl;
+        instDeficit[instId] = std::max(0.0, instTargetValue - instCurrentValue);
+
+        totalDeficit += instDeficit[instId];
+        //        if (instDeficit >= minDeficitThreshold) {
+        //          totalDeficit += instDeficit;
+        //        }
+    }
+
+
+    for (const auto& [instId, deficit] : instDeficit) {
+        double allocation = 0.0;
+
+//       std::cout << "PLANNED reallocate: " << instId << " totalDeficit " << totalDeficit << " deficit " << deficit << std::endl;
+        if (totalDeficit > 0) {
+            allocation = context.cashBalance * (deficit / totalDeficit);
+        } else {
+            allocation = context.cashBalance * params.weights.at(instId);
+        }
+
+        auto priceResult = getPrice(instId, context.currentDate, context);
+        if (!priceResult) {
+            return std::unexpected("Can't take price for " + instId);
+        }
+        double price = *priceResult;
+        if (allocation < price)
+            continue;
+
+        std::size_t shares = static_cast<std::size_t>(std::floor(allocation / price));
+
+        double totalAmount = shares * price;
+
+        if (totalAmount > context.cashBalance) {
+            shares = static_cast<std::size_t>(std::floor(context.cashBalance / price));
+            totalAmount = shares * price;
+        }
+
+        if (shares == 0) {
+            continue;
+        }
+
+        res[instId].sharesTraded = static_cast<double>(shares);
+        res[instId].price = price;
+        res[instId].totalAmount = totalAmount;
+        res[instId].reason = context.dayIndex == 0 ? "initial purchase" : "rebalance buy";
+
+    }
+
+
+    return res;
+}
+
 
 
 std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
@@ -386,15 +491,6 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
 
     if (shares == 0) {
         return result;
-    }
-
-    if (taxCalculator_) {
-        TaxLot lot;
-        lot.purchaseDate = context.currentDate;
-        lot.quantity = static_cast<double>(shares);
-        lot.costBasis = price;
-        lot.instrumentId = instrumentId;
-        context.taxLots[instrumentId].push_back(lot);
     }
 
     result.sharesTraded = static_cast<double>(shares);

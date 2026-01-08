@@ -62,6 +62,18 @@ protected:
         const std::string& instrumentId,
         TradingContext& context,
         const PortfolioParams& params) override;
+
+
+    std::expected<std::map<std::string, TradeResult>, std::string> whatToBuy(
+        TradingContext& context,
+        const PortfolioParams& params) override;
+
+
+    std::expected<std::map<std::string, TradeResult>, std::string> whatToSell(
+        TradingContext& context,
+        const PortfolioParams& params) override;
+
+
 };
 
 } // namespace portfolio

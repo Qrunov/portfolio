@@ -13,10 +13,21 @@ namespace portfolio {
 
 std::expected<void, std::string> BuyHoldStrategy::initializeStrategy(
     TradingContext& /* context */,
-    const PortfolioParams& /* params */)
+    const PortfolioParams&  params)
 {
     return {};
 }
+
+double BuyHoldStrategy::getDefaultWeight(TradingContext& context,const PortfolioParams& params){
+    uint32_t instCount = params.instrumentIds.size();
+    for (const auto& iId: params.instrumentIds)
+        if (isDelisted(iId,context.currentDate, context))
+            instCount--;
+
+    double res = 1.0 / static_cast<double>(instCount);
+    return res;
+}
+
 
 
 
@@ -48,7 +59,7 @@ std::expected<std::map<std::string, TradeResult>, std::string> BuyHoldStrategy::
         }
         else if (context.isRebalanceDay){
             //TODO: заменить на функцию вычисления весов по умолчанию
-            double instWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
+            double instWeight = getDefaultWeight(context, params);
             if (params.weights.count(instId)) {
                 instWeight = params.weights.at(instId);
             }
@@ -240,8 +251,8 @@ std::expected<std::map<std::string, TradeResult>, std::string> BuyHoldStrategy::
     for (const auto& instId : params.instrumentIds) {
         if (isDelisted(instId,context.currentDate,context))
             continue;
-        //TODO: вынести подсчет весов в отдельную функцию, учесть делистинг
-        double instWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
+
+        double instWeight = getDefaultWeight(context,params);
         if (params.weights.count(instId)) {
             instWeight = params.weights.at(instId);
         }
@@ -443,7 +454,7 @@ std::expected<TradeResult, std::string> BuyHoldStrategy::buy(
     double totalDeficit = 0.0;
 
     for (const auto& instId : params.instrumentIds) {
-        double instWeight = 1.0 / static_cast<double>(params.instrumentIds.size());
+        double instWeight =  getDefaultWeight(context,params);
         if (params.weights.count(instId)) {
             instWeight = params.weights.at(instId);
         }

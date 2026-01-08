@@ -74,6 +74,10 @@ protected:
         const PortfolioParams& params) override;
 
 
+
+    double getDefaultWeight(TradingContext& context,const PortfolioParams& params);
+
+
 };
 
 } // namespace portfolio
